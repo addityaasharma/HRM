@@ -675,41 +675,79 @@ def edit_documents(documentid):
     try:
         userID = g.user.get('userID') if g.user else None
         if not userID:
-            return jsonify({"status": "error", "message": "No user or auth token found"}), 404
+            return jsonify({"status": "error", "message": "No user or auth token provided"}), 404
 
         user = User.query.filter_by(id=userID).first()
-        if not user:
-            return jsonify({"status": "error", "message": "No user found with this id"}), 409
+        if not user or not user.panelData:
+            return jsonify({"status": "error", "message": "User or panel data not found"}), 400
 
-        document = UserDocument.query.filter_by(id=documentid).first()
+        document = UserDocument.query.filter_by(id=documentid, panelDataID=user.panelData.id).first()
         if not document:
             return jsonify({"status": "error", "message": "No document found for this user"}), 404
 
-        if 'document' not in request.files:
-            return jsonify({"status": "error", "message": "No image file provided"}), 400
-
-        image_file = request.files['document']
-        upload_result = cloudinary.uploader.upload(image_file)
-        image_url = upload_result.get('secure_url')
-
-        if not image_url:
-            return jsonify({"status": "error", "message": "Failed to upload image"}), 500
+        updated = False
 
         title = request.form.get('title')
         if title:
             document.title = title
+            updated = True
 
-        document.documents = image_url
+        file = request.files.get('document')
+        print('file',file)
+        if file:
+            result = cloudinary.uploader.upload(file)
+            doc_url = result.get("secure_url")
+
+            if not doc_url:
+                return jsonify({"status": "error", "message": "Image upload failed"}), 500
+
+            document.documents = doc_url
+            updated = True
+
+        if not updated:
+            return jsonify({"status": "error", "message": "No changes submitted"}), 400
+
         db.session.commit()
 
         return jsonify({
             "status": "success",
-            "message": "Document image updated successfully",
+            "message": "Document updated successfully",
             "document": {
                 "id": document.id,
-                "documents": image_url,
+                "url": document.documents,
                 "title": document.title
             }
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e)
+        }), 500
+
+@user.route('/document/<int:document_id>', methods=['DELETE'])
+def delete_document(document_id):
+    try:
+        userID = g.user.get('userID') if g.user else None
+        if not userID:
+            return jsonify({"status": "error", "message": "No user or auth token provided"}), 404
+
+        user = User.query.filter_by(id=userID).first()
+        if not user or not user.panelData:
+            return jsonify({"status": "error", "message": "User or panel data not found"}), 400
+
+        document = UserDocument.query.filter_by(id=documentid, panelDataID=user.panelData.id).first()
+        if not document:
+            return jsonify({"status": "error", "message": "Document not found or does not belong to user"}), 404
+
+        db.session.delete(document)
+        db.session.commit()
+
+        return jsonify({
+            "status": "success",
+            "message": "Document deleted successfully"
         }), 200
 
     except Exception as e:
