@@ -1,4 +1,4 @@
-from models import SuperAdmin, SuperAdminPanel, db, PunchData, User, UserTicket
+from models import SuperAdmin, SuperAdminPanel, db, PunchData, User, UserTicket, AdminLeave
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask import Blueprint, request, jsonify, g
 import datetime, random, string, re, math
@@ -732,3 +732,184 @@ def user_leaves():
             "message": "Internal Server Error",
             "error": str(e)
         }), 500
+    
+
+@superAdminBP.route('/leave', methods=['POST'])
+def leaveDetails():
+    data = request.get_json()
+    if not data:
+        return jsonify({"status": "error", "message": "No data found"}), 404
+
+    required_fields = ['leaveType', 'Quota', 'LeaveStatus', 'carryForward', 'active']
+    if not all(field in data for field in required_fields):
+        return jsonify({"status": "error", "message": "Please fill all details"}), 404
+
+    try:
+        userID = g.user.get('userID') if g.user else None
+        if not userID:
+            return jsonify({"status": "error", "message": "No user or auth token provided"}), 404
+
+        superadmin = SuperAdmin.query.filter_by(id=userID).first()
+        if not superadmin:
+            user = User.query.filter_by(id=userID).first()
+            if not user or user.userRole.lower() != 'hr':
+                return jsonify({"status": "error", "message": "You are not allowed to manage this"}), 403
+        else:
+            panel_id = superadmin.superadminPanel.id
+
+        adminLeave = AdminLeave(
+            superadminPanel=panel_id,
+            leaveType=data['leaveType'],
+            Quota=data['Quota'],
+            LeaveStatus=data['LeaveStatus'],
+            carryForward=data['carryForward'],
+            active=data['active'],
+        )
+
+        db.session.add(adminLeave)
+        db.session.commit()
+
+        return jsonify({"status": "success", "message": "Posted successfully"}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e)
+        }), 500
+
+
+@superAdminBP.route('/leave/<int:id>', methods=['PUT'])
+def editleave(id):
+    data = request.get_json()
+    if not data:
+        return jsonify({"status": "error", "message": "No data found"}), 404
+
+    try:
+        userID = g.user.get('userID') if g.user else None
+        if not userID:
+            return jsonify({"status": "error", "message": "No user or auth token provided"}), 404
+
+        superadmin = SuperAdmin.query.filter_by(id=userID).first()
+        if superadmin:
+            panel_id = superadmin.superadminPanel.id
+        else:
+            user = User.query.filter_by(id=userID).first()
+            if not user or user.userRole.lower() != 'hr':
+                return jsonify({"status": "error", "message": "You are not allowed to manage this"}), 403
+
+        leave = AdminLeave.query.filter_by(id=id, superadminPanel=panel_id).first()
+        if not leave:
+            return jsonify({"status": "error", "message": "Leave not found"}), 404
+
+        leave.leaveType = data.get('leaveType', leave.leaveType)
+        leave.Quota = data.get('Quota', leave.Quota)
+        leave.LeaveStatus = data.get('LeaveStatus', leave.LeaveStatus)
+        leave.carryForward = data.get('carryForward', leave.carryForward)
+        leave.active = data.get('active', leave.active)
+
+        db.session.commit()
+
+        return jsonify({"status": "success", "message": "Leave updated successfully"}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e)
+        }), 500
+
+
+@superAdminBP.route('/leave', methods=['GET'])
+def get_leaveDetails():
+    try:
+        userID = g.user.get('userID')  if g.user else None
+        if not userID:
+            return jsonify({"status" : "error", "message" : "No user or auth token provided"}), 400
+        
+        superadmin = SuperAdmin.query.filter_by(id=userID).first()
+        if not superadmin:
+            user = User.query.filter_by(id=userID).first()
+            if not user or user.userRole.lower() != 'hr':
+                return jsonify({"status": "error", "message": "You are not allowed to manage this"}), 403
+        
+        leavedetails = superadmin.superadminPanel.adminLeave
+        if not leavedetails:
+            return jsonify({"status" : "error", "message" : "No Details"}),409
+        
+        leavelist=[]
+        for leave in leavedetails:
+            leavelist.append({
+                'id' : leave.id,
+                'leaveType' : leave.leaveType,
+                'Quota' : leave.Quota,
+                'LeaveStatus' : leave.LeaveStatus,
+                'carryForward' : leave.carryForward,
+                'active' : leave.active,
+            })
+        
+        return jsonify({"status" : "success", "message" : "Fetched Successfully", "data": leavelist}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"status" : "error", "message" : "Internal server error", "error" : str(e)}), 500
+    
+
+@superAdminBP.route('/leave/<int:id>', methods=['DELETE'])
+def deleteLeave(id):
+    try:
+        userID = g.user.get('userID') if g.user else None
+        if not userID:
+            return jsonify({"status": "error", "message": "No user or auth token provided"}), 400
+
+        superadmin = SuperAdmin.query.filter_by(id=userID).first()
+        if superadmin:
+            panel_id = superadmin.superadminPanel.id
+        else:
+            user = User.query.filter_by(id=userID).first()
+            if not user or user.userRole.lower() != 'hr':
+                return jsonify({"status": "error", "message": "You are not allowed to manage this"}), 403
+
+
+        leave = AdminLeave.query.filter_by(id=id, superadminPanel=panel_id).first()
+        if not leave:
+            return jsonify({"status": "error", "message": "Leave not found"}), 404
+
+        db.session.delete(leave)
+        db.session.commit()
+
+        return jsonify({"status": "success", "message": "Leave deleted successfully"}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e)
+        }), 500
+
+
+@superAdminBP.route('/employee', methods=['POST'])
+def employeeCreation():
+    try:
+        userID = g.user.get('userID') if g.user else None
+        if not userID:
+            return jsonify({"status" :"error" , "message" : "No user or auth token"}), 400
+        
+        superadmin = SuperAdmin.query.filter_by(id=userID).first()
+        if superadmin:
+            panel_id = superadmin.superadminPanel.id
+            super_id = superadmin.superId
+        else:
+            user = User.query.filter_by(id=userID).first()
+            if not user or user.userRole.lower() != 'hr':
+                return jsonify({"status": "error", "message": "You are not allowed to manage this"}), 403
+            
+        user = User(
+            
+        )
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"status" : "error", "message" : "Internal Server Error", "error" : str(e)})

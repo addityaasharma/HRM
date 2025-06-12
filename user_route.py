@@ -727,7 +727,7 @@ def edit_documents(documentid):
             "error": str(e)
         }), 500
 
-@user.route('/document/<int:document_id>', methods=['DELETE'])
+@user.route('/documents/<int:document_id>', methods=['DELETE'])
 def delete_document(document_id):
     try:
         userID = g.user.get('userID') if g.user else None
@@ -738,7 +738,7 @@ def delete_document(document_id):
         if not user or not user.panelData:
             return jsonify({"status": "error", "message": "User or panel data not found"}), 400
 
-        document = UserDocument.query.filter_by(id=documentid, panelDataID=user.panelData.id).first()
+        document = UserDocument.query.filter_by(id=document_id, panelDataID=user.panelData.id).first()
         if not document:
             return jsonify({"status": "error", "message": "Document not found or does not belong to user"}), 404
 

@@ -26,6 +26,7 @@ class SuperAdminPanel(db.Model):
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     superadmin_id = db.Column(db.Integer, db.ForeignKey('superadmin.id'), nullable=False)
     allUsers = db.relationship('User', backref='superadminpanel', lazy=True)
+    adminLeave = db.relationship('AdminLeave', backref='superadminpanel', lazy=True)
 
 class AdminLeave(db.Model):
     __tablename__= 'adminleave'
