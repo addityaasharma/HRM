@@ -727,6 +727,7 @@ def edit_documents(documentid):
             "error": str(e)
         }), 500
 
+
 @user.route('/documents/<int:document_id>', methods=['DELETE'])
 def delete_document(document_id):
     try:

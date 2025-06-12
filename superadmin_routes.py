@@ -388,7 +388,7 @@ def allUsers():
         }), 500
 
 
-@superAdminBP.route('/edit_user/<int:userId>',methods=['PUT'])
+@superAdminBP.route('/all-users/<int:userId>',methods=['PUT'])
 def edit_user(userId):
     data=request.get_json()
     if not data:
@@ -872,7 +872,7 @@ def deleteLeave(id):
                 return jsonify({"status": "error", "message": "You are not allowed to manage this"}), 403
 
 
-        leave = AdminLeave.query.filter_by(id=id, superadminPanel=panel_id).first()
+        leave = AdminLeave.query.filter_by(id=id).first()
         if not leave:
             return jsonify({"status": "error", "message": "Leave not found"}), 404
 
@@ -890,8 +890,18 @@ def deleteLeave(id):
         }), 500
 
 
-@superAdminBP.route('/employee', methods=['POST'])
+@superAdminBP.route('/employee', methods=['POST'])   #pending
 def employeeCreation():
+    data = request.get_json()
+
+    required_fields = ['userName', 'email', 'password', 'userRole', 'gender']
+    if not all(field in data for field in required_fields):
+        return jsonify({'error': 'Missing required fields'}), 400
+
+    email = data['email']
+
+    if User.query.filter_by(email=email).first():
+        return jsonify({'error': 'User already exists'}), 409
     try:
         userID = g.user.get('userID') if g.user else None
         if not userID:
@@ -906,10 +916,42 @@ def employeeCreation():
             if not user or user.userRole.lower() != 'hr':
                 return jsonify({"status": "error", "message": "You are not allowed to manage this"}), 403
             
-        user = User(
-            
-        )
 
     except Exception as e:
         db.session.rollback()
+        return jsonify({"status" : "error", "message" : "Internal Server Error", "error" : str(e)}), 500
+    
+
+@superAdminBP.route('/all-users/<int:id>', methods=['DELETE'])
+def editEmployee(id):
+    try:
+        userID = g.user.get('userID') if g.user else None
+        if not userID:
+            return jsonify({"status" :"error" , "message" : "No user or auth token"}), 400
+        
+        superadmin = SuperAdmin.query.filter_by(id=userID).first()
+        if superadmin:
+            panel_id = superadmin.superadminPanel.id
+            super_id = superadmin.superId
+        else:
+            user = User.query.filter_by(id=userID).first()
+            if not user or user.userRole.lower() != 'hr':
+                return jsonify({"status": "error", "message": "You are not allowed to manage this"}), 403
+            
+        user = User.query.filter_by(id=id).first()
+        if not user:
+            return jsonify({"status" : "error", "message" : "No user found"}),409
+        
+        db.session.delete(user)
+        db.session.commit()
+        
+        return jsonify({"status" : "success", "message" : "Deleted successfully"}),200
+            
+    except Exception as e:
+        db.session.rollback()
         return jsonify({"status" : "error", "message" : "Internal Server Error", "error" : str(e)})
+
+
+@superAdminBP.route('/route_name')
+def method_name():
+    pass
