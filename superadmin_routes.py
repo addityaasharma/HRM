@@ -136,7 +136,7 @@ def superadmin_login():
             'paneldata': panel_data,
             'is_super_admin': exist_admin.is_super_admin
         },
-        'tokens': {
+        'token': {
             'access_token': access_token,
             'refresh_token': refresh_token
         }
@@ -146,7 +146,6 @@ def superadmin_login():
 @superAdminBP.route('/all-punchdetails', methods=['GET'])
 def all_punchDetails():
     try:
-        # Auth and Access Checks
         userId = g.user.get('userID') if g.user else None
         if not userId:
             return jsonify({
@@ -161,7 +160,6 @@ def all_punchDetails():
                 'message': 'SuperAdmin or their panel not found.'
             }), 404
 
-        # Check if Superadmin or HR
         if not superadmin.is_super_admin:
             user = User.query.filter_by(id=userId).first()
             if not user or user.userRole.lower() != 'hr':
@@ -170,7 +168,6 @@ def all_punchDetails():
                     'message': 'You are not allowed to access this route'
                 }), 403
 
-        # Collect all user panel IDs under this superadmin
         users = User.query.filter_by(superadmin_panel_id=superadmin.superadminPanel.id).all()
         if not users:
             return jsonify({
@@ -185,8 +182,7 @@ def all_punchDetails():
                 'message': 'No panel data found for users under this SuperAdmin.'
             }), 404
 
-        # Base Query
-        query = PunchData.query.filter(PunchData.user_panel_id.in_(panel_ids))
+        query = PunchData.query.filter(PunchData.panelData.in_(panel_ids))
 
         # === Optional Date Filter ===
         date_str = request.args.get('date')
@@ -200,18 +196,15 @@ def all_punchDetails():
                     'message': 'Invalid date format. Use YYYY-MM-DD.'
                 }), 400
 
-        # === Optional Department Filter ===
         department = request.args.get('department')
         if department:
             user_ids_in_dept = [user.panelData.id for user in users if user.department and user.department.lower() == department.lower()]
             query = query.filter(PunchData.user_panel_id.in_(user_ids_in_dept))
 
-        # === Optional Status Filter ===
         status = request.args.get('status')
         if status:
             query = query.filter(PunchData.status.ilike(f"%{status}%"))
 
-        # === Optional Search Query (name, email, empId) ===
         search = request.args.get('query')
         if search:
             query = query.filter(
@@ -224,8 +217,8 @@ def all_punchDetails():
 
         # === Pagination ===
         page = request.args.get('page', default=1, type=int)
-        per_page = request.args.get('per_page', default=10, type=int)
-        paginated_data = query.order_by(PunchData.login.desc()).paginate(page=page, per_page=per_page, error_out=False)
+        limit = request.args.get('limit', default=10, type=int)
+        paginated_data = query.order_by(PunchData.login.desc()).paginate(page=page, per_page=limit, error_out=False)
 
         # === Serialize ===
         punch_list = []
@@ -245,7 +238,7 @@ def all_punchDetails():
             'status': 'success',
             'message': 'Punch data fetched successfully.',
             'page': page,
-            'per_page': per_page,
+            'limit': limit,
             'total': paginated_data.total,
             'total_pages': paginated_data.pages,
             'data': punch_list
@@ -660,6 +653,82 @@ def editTicket(ticket_id):
         }), 500
 
 
-@superAdminBP.route('/route_name')
-def method_name():
-    pass
+@superAdminBP.route('/all_leaves', methods=['GET'])
+def user_leaves():
+    try:
+        userID = g.user.get('userID') if g.user else None
+        if not userID:
+            return jsonify({
+                "status": "error",
+                "message": "No user ID or auth token provided"
+            }), 404
+
+        superadmin = SuperAdmin.query.filter_by(id=userID).first()
+        if not superadmin:
+            user = User.query.filter_by(id=userID).first()
+            if not user or user.userRole.lower() != 'hr':
+                return jsonify({"status": "error", "message": "You are not allowed to manage this."}), 400
+
+        page = int(request.args.get('page', 1))
+        limit = int(request.args.get('limit', 10))
+        status = request.args.get('status') 
+        department = request.args.get('department')
+
+        query = User.query.filter_by(superadminId=superadmin.id)
+
+        if department:
+            query = query.filter(User.department.ilike(f"%{department}%"))
+
+        total_users = query.count()
+        users = query.offset((page - 1) * limit).limit(limit).all()
+
+        results = []
+
+        for user in users:
+            if user.panelData and user.panelData.userLeaveData:
+                filtered_leaves = [
+                    {
+                        "leaveId": leave.id,
+                        "type": leave.leavetype,
+                        "from": leave.leavefrom,
+                        "to": leave.leaveto,
+                        "status": leave.status,
+                        "reason": leave.reason,
+                        "empId": leave.empId,
+                        "email": leave.email,
+                        "day": leave.day,
+                        "month": leave.month
+                    }
+                    for leave in user.panelData.userLeaveData
+                    if not status or leave.status.lower() == status.lower()
+                ]
+                if filtered_leaves:
+                    results.append({
+                        "userId": user.id,
+                        "userName": user.userName,
+                        "department": user.department,
+                        "leaves": filtered_leaves
+                    })
+
+        if not results:
+            return jsonify({
+                "status": "error",
+                "message": "No leave data found for given filters"
+            }), 409
+
+        return jsonify({
+            "status": "success",
+            "message": "Leave data fetched successfully",
+            "page": page,
+            "limit": limit,
+            "totalUsers": total_users,
+            "data": results
+        })
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e)
+        }), 500

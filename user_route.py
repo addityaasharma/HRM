@@ -1,10 +1,12 @@
+from models import User,UserPanelData,db,SuperAdmin,PunchData, UserTicket, UserDocument
 from werkzeug.security import generate_password_hash, check_password_hash
-from models import User,UserPanelData,db,SuperAdmin,PunchData, UserTicket
 from flask import Blueprint, request, json, jsonify, g
 from otp_utils import generate_otp, send_otp
 from middleware import create_tokens
-from datetime import datetime
+from datetime import datetime,time
 from dotenv import load_dotenv
+from config import cloudinary
+import cloudinary.uploader
 from redis import Redis
 import random,os
 import string
@@ -137,7 +139,7 @@ def verify_otp_route():
         'access_token': access_token,
         "refresh_token": refresh_token,
     }), 201
-        
+
 
 @user.route('/login', methods=['POST'])
 def user_login():
@@ -178,83 +180,144 @@ def user_login():
     }), 200
 
 
-@user.route('/punchin',methods=['POST'])
+@user.route('/punchin', methods=['POST'])
 def punch_details():
-    if request.method == 'POST':
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({
+                'status': 'error',
+                'message': 'No input data provided'
+            }), 400
+
+        required_fields = ['login', 'location']
+        if not all(field in data for field in required_fields):
+            return jsonify({
+                'status': 'error',
+                'message': 'All fields are required',
+            }), 400
+
+        userId = g.user.get('userID') if g.user else None
+        if not userId:
+            return jsonify({
+                'status': 'error',
+                'message': 'User ID is missing or not authenticated'
+            }), 400
+
+        user = User.query.filter_by(id=userId).first()
+        if not user:
+            return jsonify({
+                'status': 'error',
+                'message': 'No user found with this ID'
+            }), 404
+
+        usersPanelData = user.panelData
+        if not usersPanelData:
+            return jsonify({
+                'status': 'error',
+                'message': 'No user panel data found'
+            }), 404
+
         try:
-            userId = g.user.get('userID') if g.user else None
-            if not userId:
-                return jsonify({
-                    'message': 'User id is missing'
-                }), 400
-
-            user = User.query.filter_by(id=userId).first()
-            if not user:
-                return jsonify({
-                    'message': 'No user found with this id'
-                }), 404
-        
-            usersPanelData = user.panelData
-            if not usersPanelData:
-                return jsonify({
-                    'status': 'error',
-                    'message': 'No user panel data found'
-                }), 404
-
-            data = request.get_json()
-            if not data:
-                return jsonify({
-                    'status': 'error',
-                    'message': 'No input data provided'
-                }), 400
-
-            required_fields = ['login', 'location']
-            if not all(field in data for field in required_fields):
-                return jsonify({
-                    'status': 'error',
-                    'message': 'All fields are required',
-                }), 400
-
-            try:
-                login_time = datetime.fromisoformat(data.get('login'))
-            except Exception:
-                return jsonify({
-                    'status': 'error',
-                    'message': 'Invalid datetime format for login'
-                }), 400
-
-            punchin = PunchData(
-                panelData=usersPanelData.id,
-                empId=user.empId,
-                name=user.userName,
-                email=user.email,
-                login=login_time,
-                logout=None,
-                location=data.get('location'),
-                totalhour=None,
-                productivehour=None,
-                shift=None,
-                status="present"
-            )
-
-            db.session.add(punchin)
-            db.session.commit()
-
+            login_time = datetime.fromisoformat(data.get('login'))
+        except Exception:
             return jsonify({
-                'status': 'success',
-                'message': 'Punch-in successful',
-                'punch_id': punchin.id
-            }), 201
+                'status': 'error',
+                'message': 'Invalid datetime format for login'
+            }), 400
 
-        except Exception as e:
-            db.session.rollback()
+        punchin = PunchData(
+            panelData=usersPanelData.id,
+            empId=user.empId,
+            name=user.userName,
+            email=user.email,
+            login=login_time,
+            logout=None,
+            location=data.get('location'),
+            totalhour=None,
+            productivehour=None,
+            shift=None,
+            status="present"
+        )
+
+        db.session.add(punchin)
+        db.session.commit()
+
+        return jsonify({
+            'status': 'success',
+            'message': 'Punch-in successful',
+            'punch_id': punchin.id
+        }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            'status': 'error',
+            'message': 'Error processing punch-in',
+            'error': str(e)
+        }), 500
+
+
+@user.route('/punchin', methods=['GET'])
+def get_punchDetails():
+    try:
+        userID = g.user.get('userID') if g.user else None
+        if not userID:
             return jsonify({
-                'message': 'Error processing punch-in',
-                'error': str(e)
-            }), 500
+                "status": "error",
+                "message": "No user found or auth token provided"
+            }), 404
 
-    else:
-        return jsonify({'message': 'Method not allowed'}), 405
+        user = User.query.filter_by(id=userID).first()
+        if not user:
+            return jsonify({
+                "status": "error",
+                "message": "No user found"
+            }), 404
+
+        panel_data = user.panelData
+        if not panel_data:
+            return jsonify({
+                "status": "error",
+                "message": "User panel data not found"
+            }), 404
+
+        punchdetails = panel_data.userPunchData
+        if not punchdetails:
+            return jsonify({
+                "status": "error",
+                "message": "No punch records found"
+            }), 404
+
+        punch_list = []
+        for punch in punchdetails:
+            punch_list.append({
+                "id": punch.id,
+                "empId": punch.empId,
+                "name": punch.name,
+                "email": punch.email,
+                "login": punch.login.isoformat() if punch.login else None,
+                "logout": punch.logout.isoformat() if punch.logout else None,
+                "location": punch.location,
+                "status": punch.status,
+                "totalhour": punch.totalhour if isinstance(punch.totalhour, str) else punch.totalhour.strftime('%H:%M:%S') if punch.totalhour else None,
+                "productivehour": punch.productivehour.isoformat() if punch.productivehour else None,
+                "shift": punch.shift.isoformat() if punch.shift else None
+            })
+
+        return jsonify({
+            "status": "success",
+            "message": "Punch details fetched successfully",
+            "data": punch_list
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e)
+        }), 500
 
 
 @user.route('/punchin/<int:punchId>',methods=['PUT'])
@@ -266,7 +329,7 @@ def edit_punchDetails(punchId):
             "message": "No data found"
         }), 400
 
-    required_fields = ['logout', 'location', 'totalhour', 'productivehour', 'status']
+    required_fields = ['logout', 'location', 'totalHour']
     if not all(field in data for field in required_fields):
         return jsonify({
             "status": "error",
@@ -274,6 +337,21 @@ def edit_punchDetails(punchId):
         }), 400
 
     try:
+        # Convert logout datetime (auto-parse Zulu/UTC format)
+        logout_time = datetime.fromisoformat(data.get('logout').replace('Z', '+00:00'))
+
+        # Convert totalHour string "HH:MM:SS" to time object
+        total_hour_str = data.get('totalHour')
+        try:
+            h, m, s = map(int, total_hour_str.strip().split(':'))
+            total_hour_time = time(hour=h, minute=m, second=s)
+        except ValueError:
+            return jsonify({
+                "status": "error",
+                "message": "Invalid format for totalHour. Expected HH:MM:SS"
+            }), 400
+
+        # Auth and user check
         userID = g.user.get('userID') if g.user else None
         if not userID:
             return jsonify({
@@ -295,12 +373,11 @@ def edit_punchDetails(punchId):
                 "message": "No punch details found with this ID"
             }), 404
 
-        # Update fields
-        punchdata.logout = data['logout']
+        # Update
+        punchdata.logout = logout_time
         punchdata.location = data['location']
-        punchdata.totalhour = data['totalhour']
-        punchdata.productivehour = data['productivehour']
-        punchdata.status = data['status']
+        punchdata.totalhour = total_hour_time
+        punchdata.status = 'fullday'
 
         db.session.commit()
 
@@ -317,7 +394,7 @@ def edit_punchDetails(punchId):
             "error": str(e)
         }), 500
 
-    
+
 @user.route('/edit_details', methods=['PUT'])
 def edit_details():
     try:
@@ -381,7 +458,7 @@ def edit_details():
         }), 500
 
 
-@user.route('/raise_ticket')
+@user.route('/raise_ticket', methods=['POST'])
 def raise_ticket():
     data = request.get_json()
     if not data:
@@ -390,7 +467,7 @@ def raise_ticket():
             'message': 'No data found'
         }), 400
 
-    required_fields = ['topic', 'problem', 'priority', 'department', 'document']
+    required_fields = ['topic', 'problem', 'priority', 'department']
     if not all(field in data for field in required_fields):
         return jsonify({
             'status': 'error',
@@ -420,7 +497,7 @@ def raise_ticket():
             problem=data['problem'],
             priority=data['priority'],
             department=data['department'],
-            document=data['document'],
+            document=None,
             status='pending',
             userticketpanel=user.panelData.id
         )
@@ -446,3 +523,237 @@ def raise_ticket():
             'message': 'Internal server error',
             'error': str(e)
         }), 500
+
+
+@user.route('/get_ticket', methods=['GET'])
+def get_ticket():
+    try:
+        userID = g.user.get('userID') if g.user else None
+        if not userID:
+            return jsonify({"status": "error", "message": "No user ID found"}), 404
+
+        user = User.query.filter_by(id=userID).first()
+        if not user:
+            return jsonify({"status": "error", "message": "No user found with this ID"}), 400
+
+        panel_data = user.panelData
+        if not panel_data:
+            return jsonify({"status": "error", "message": "User panel data not found"}), 404
+
+        page = int(request.args.get('page', 1))
+        limit = int(request.args.get('limit', 10))
+        offset = (page - 1) * limit
+
+        all_tickets = panel_data.UserTicket
+        total_tickets = len(all_tickets)
+        paginated_tickets = all_tickets[offset:offset + limit]
+
+        if not paginated_tickets:
+            return jsonify({"status": "error", "message": "No tickets found on this page"}), 404
+
+        ticket_list = []
+        for ticket in paginated_tickets:
+            ticket_list.append({
+                "id": ticket.id,
+                "userName": ticket.userName,
+                "userId": ticket.userId,
+                "date": ticket.date.isoformat() if ticket.date else None,
+                "topic": ticket.topic,
+                "problem": ticket.problem,
+                "priority": ticket.priority,
+                "department": ticket.department,
+                "document": ticket.document,
+                "status": ticket.status or 'pending'
+            })
+
+        return jsonify({
+            "status": "success",
+            "total": total_tickets,
+            "page": page,
+            "limit": limit,
+            "total_pages": (page + total_tickets - 1),
+            "message": "Fetched successfully",
+            "data": ticket_list,
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e)
+        }), 500
+    
+
+@user.route('/documents', methods=['POST'])
+def upload_documents():
+    try:
+        userID = g.user.get('userID') if g.user else None
+        if not userID:
+            return jsonify({"status": "error", "message": "No user or auth token provided"}), 404
+
+        user = User.query.filter_by(id=userID).first()
+        if not user or not user.panelData:
+            return jsonify({"status": "error", "message": "User or panel data not found"}), 400
+
+        file = request.files.get('document')
+        if not file:
+            return jsonify({"status": "error", "message": "No file found"}), 404
+
+        title = request.form.get('title', '')
+
+        result = cloudinary.uploader.upload(file)
+        doc_url = result.get("secure_url")
+
+        newDoc = UserDocument(
+            documents=doc_url,
+            panelDataID=user.panelData.id,
+            title=title
+        )
+        db.session.add(newDoc)
+        db.session.commit()
+
+        return jsonify({
+            "status": "success",
+            "message": "Document uploaded successfully",
+            "document": {
+                "url": doc_url,
+                "title": title
+            }
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e)
+        }), 500
+
+
+@user.route('/documents', methods=['GET'])
+def get_documents():
+    try:
+        userID = g.user.get('userID') if g.user else None
+        if not userID:
+            return jsonify({"status": "error", "message": "No user or auth token found"}), 404
+
+        user = User.query.filter_by(id=userID).first()
+        if not user:
+            return jsonify({"status": "error", "message": "No user found with this id"}), 409
+
+        page = int(request.args.get('page', 1))
+        limit = int(request.args.get('limit', 10))
+
+        documents = user.panelData.UserDocuments
+
+        document_list = []
+        for document in documents:
+            document_list.append({
+                'id': document.id,
+                "documents": document.documents,
+                "title": document.title,
+            })
+
+        return jsonify({
+            "status": "success",
+            "message": "Fetched successfully",
+            "documents": document_list,
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e)
+        }), 500
+
+
+@user.route('/documents/<int:documentid>', methods=['PUT'])
+def edit_documents(documentid):
+    try:
+        userID = g.user.get('userID') if g.user else None
+        if not userID:
+            return jsonify({"status": "error", "message": "No user or auth token found"}), 404
+
+        user = User.query.filter_by(id=userID).first()
+        if not user:
+            return jsonify({"status": "error", "message": "No user found with this id"}), 409
+
+        document = UserDocument.query.filter_by(id=documentid).first()
+        if not document:
+            return jsonify({"status": "error", "message": "No document found for this user"}), 404
+
+        if 'document' not in request.files:
+            return jsonify({"status": "error", "message": "No image file provided"}), 400
+
+        image_file = request.files['document']
+        upload_result = cloudinary.uploader.upload(image_file)
+        image_url = upload_result.get('secure_url')
+
+        if not image_url:
+            return jsonify({"status": "error", "message": "Failed to upload image"}), 500
+
+        title = request.form.get('title')
+        if title:
+            document.title = title
+
+        document.documents = image_url
+        db.session.commit()
+
+        return jsonify({
+            "status": "success",
+            "message": "Document image updated successfully",
+            "document": {
+                "id": document.id,
+                "documents": image_url,
+                "title": document.title
+            }
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e)
+        }), 500
+
+
+@user.route('/salary', methods=['GET'])
+def salary_details():
+    try:
+        userID = g.user.get('userID') if g.user else None
+        if not userID:
+            return jsonify({"status" : "error", "message" : "No user_id or auth token provided"}), 404
+        
+        user = User.query.filter_by(id=userID).first()
+        if not user:
+            return jsonify({"status" : "error", "message" : "No user found"}), 409
+        
+        salaryDetails = user.panelData.userSalaryDetails
+        if not salaryDetails:
+            return jsonify({"status" : "error", "message" : "No salary details"}), 409
+        
+        salarylist=[]
+        for salary in salaryDetails:
+            salarylist.append({
+                "id" : salary.id,
+                "empId" : salary.empId,
+                "present" : salary.present,
+                "absent" : salary.absent,
+                "basicSalary" : salary.basicSalary,
+                "deductions" : salary.deductions,
+                "finalPay" : salary.finalPay,
+                "mode" : salary.mode,
+                "status" : salary.status,
+                "payslip" : salary.payslip,
+                "approvedLeaves" : salary.approvedLeaves,
+            })
+
+        return jsonify({"status" : "success", "message" : "fetched Successfully", "data" : salarylist}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"status" : "error", "message" : "Internal Server Error", "error" : str(e)}), 500

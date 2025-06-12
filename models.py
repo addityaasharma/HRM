@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, time
 from flask_sqlalchemy import SQLAlchemy
 
 db = SQLAlchemy()
@@ -26,6 +26,16 @@ class SuperAdminPanel(db.Model):
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     superadmin_id = db.Column(db.Integer, db.ForeignKey('superadmin.id'), nullable=False)
     allUsers = db.relationship('User', backref='superadminpanel', lazy=True)
+
+class AdminLeave(db.Model):
+    __tablename__= 'adminleave'
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    superadminPanel = db.Column(db.Integer, db.ForeignKey('superadminpanel.id'), nullable=False)
+    leaveType = db.Column(db.String(120))
+    Quota = db.Column(db.Integer)
+    LeaveStatus = db.Column(db.String(120))
+    carryForward = db.Column(db.Boolean, default=True)
+    active = db.Column(db.Boolean, default=True)
 
 class User(db.Model):
     __tablename__ = 'user'
@@ -94,6 +104,39 @@ class UserPanelData(db.Model):
     UserAcheivements = db.relationship('UserAcheivements', backref='user_panel', lazy=True)
     UserHolidays = db.relationship('UserHoliday', backref='user_panel', lazy=True)
     UserTicket = db.relationship('UserTicket', backref='user_panel', lazy=True)
+    UserDocuments = db.relationship('UserDocument', backref='user_panel', lazy=True)
+    UserSalary = db.relationship('UserSalaryDetails', backref='user_panel', lazy=True)
+
+class UserSalaryDetails(db.Model):
+    __tablename__ = 'usersalarydetails'
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    panelDataID = db.Column(db.Integer, db.ForeignKey('userpaneldata.id'), nullable=False)
+    empId = db.Column(db.String(120))
+    present = db.Column(db.String(12))
+    absent = db.Column(db.String(12))
+    basicSalary = db.Column(db.String(12))
+    deductions = db.Column(db.String(12))
+    finalPay = db.Column(db.String(12))
+    mode = db.Column(db.String(12))
+    status  = db.Column(db.String(12))
+    payslip = db.Column(db.String(12))
+    approvedLeaves = db.Column(db.String(12))
+
+class UserLeave(db.Model):
+    __tablename__ = 'userleave'
+    id = db.Column(db.Integer, primary_key=True)
+    panelData = db.Column(db.Integer, db.ForeignKey('userpaneldata.id'),nullable=False)
+    name = db.Column(db.String(200))
+    email = db.Column(db.String(200))
+    empId = db.Column(db.String(200))
+    leavetype = db.Column(db.String(120))
+    leavefrom = db.Column(db.DateTime)
+    leaveto = db.Column(db.DateTime)
+    day = db.Column(db.String(200))
+    month = db.Column(db.Integer)
+    reason = db.Column(db.String(200))
+    attachment = db.Column(db.String(200))
+    status = db.Column(db.String(100))
 
 class UserTicket(db.Model):
     __tablename__ = 'userticket'
@@ -150,9 +193,9 @@ class JobInfo(db.Model):
 class UserDocument(db.Model):
     __tablename__ = 'userdocument'
     id = db.Column(db.Integer, primary_key=True)
-    panelDataId = db.Column(db.Integer, db.ForeignKey('userpaneldata.id'), nullable=False)
-    personalDocument = db.Column(db.String(200))
-    paySlip = db.Column(db.String(200))
+    panelDataID = db.Column(db.Integer, db.ForeignKey('userpaneldata.id'), nullable=False)
+    documents = db.Column(db.String(255))
+    title = db.Column(db.String(120))
 
 class UserAcheivements(db.Model):
     __tablename__ = 'useracheivement'
@@ -185,26 +228,10 @@ class PunchData(db.Model):
     login = db.Column(db.DateTime)
     logout = db.Column(db.DateTime)
     location = db.Column(db.String(200))
-    totalhour = db.Column(db.DateTime)
+    totalhour = db.Column(db.TIME)
     productivehour = db.Column(db.DateTime)
     shift = db.Column(db.DateTime)
     status = db.Column(db.String(200))
-
-class UserLeave(db.Model):
-    __tablename__ = 'userleave'
-    id = db.Column(db.Integer, primary_key=True)
-    panelData = db.Column(db.Integer, db.ForeignKey('userpaneldata.id'),nullable=False)
-    name = db.Column(db.String(200))
-    email = db.Column(db.String(200))
-    empId = db.Column(db.String(200))
-    leavetype = db.Column(db.String(120))
-    leavefrom = db.Column(db.DateTime)
-    leaveto = db.Column(db.DateTime)
-    day = db.Column(db.String(200))
-    month = db.Column(db.Integer)
-    reason = db.Column(db.String(200))
-    attachment = db.Column(db.String(200))
-    status = db.Column(db.String(100))
 
 class UserHoliday(db.Model):
     __tablename__ = 'userholidays'
