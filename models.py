@@ -27,6 +27,14 @@ class SuperAdminPanel(db.Model):
     superadmin_id = db.Column(db.Integer, db.ForeignKey('superadmin.id'), nullable=False)
     allUsers = db.relationship('User', backref='superadminpanel', lazy=True)
     adminLeave = db.relationship('AdminLeave', backref='superadminpanel', lazy=True)
+    adminDocs = db.relationship('AdminDoc', backref='superadminpanel', lazy=True)
+
+class AdminDoc(db.Model):
+    __tablename__ = 'admindocuments'
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    superadminPanel = db.Column(db.Integer, db.ForeignKey('superadminpanel.id'), nullable=False)
+    document = db.Column(db.String(255))
+    title = db.Column(db.String(255))
 
 class AdminLeave(db.Model):
     __tablename__= 'adminleave'
@@ -96,7 +104,7 @@ class UserPanelData(db.Model):
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     userPersonalData = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, unique=True)
     
-    # Relationships (assuming these models exist)
+    # Relationships
     userPunchData = db.relationship('PunchData', backref='user_panel', lazy=True)
     userLeaveData = db.relationship('UserLeave', backref='user_panel', lazy=True)
     userSalaryDetails = db.relationship('UserSalary', backref='user_panel', lazy=True)
@@ -107,6 +115,35 @@ class UserPanelData(db.Model):
     UserTicket = db.relationship('UserTicket', backref='user_panel', lazy=True)
     UserDocuments = db.relationship('UserDocument', backref='user_panel', lazy=True)
     UserSalary = db.relationship('UserSalaryDetails', backref='user_panel', lazy=True)
+    UserMessage = db.relationship('UserChat', backref='user_panel', lazy=True)
+
+class Anouncement(db.Model):
+    __tablename__ = 'announcement'
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    userId = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    content = db.Column(db.Text)
+    imageURL = db.Column(db.String(300))
+    videoURL = db.Column(db.String(300))
+    pollQuestion = db.Column(db.String(200))
+    scheduleTime = db.Column(db.DateTime, default=datetime.utcnow)
+    createdAt = db.Column(db.DateTime, default=datetime.utcnow)
+    polloptions = db.relationship('PollOption', backref='announcement', lazy=True)
+
+class PollOption(db.Model):
+    __tablename__ = 'polloption'
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    announcementID = db.Column(db.Integer, db.ForeignKey('announcement.id'), nullable=False)
+    optionText = db.Column(db.String(120), nullable=False)
+    voteCount = db.Column(db.Integer, default=0)
+
+class UserChat(db.Model):
+    __tablename__ = 'messages'
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    panelData = db.Column(db.Integer, db.ForeignKey('userpaneldata.id'), nullable=False)
+    senderID = db.Column(db.Integer,nullable=False)
+    recieverID = db.Column(db.String(120), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 class UserSalaryDetails(db.Model):
     __tablename__ = 'usersalarydetails'

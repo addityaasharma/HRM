@@ -1,9 +1,17 @@
-from models import SuperAdmin, SuperAdminPanel, db, PunchData, User, UserTicket, AdminLeave
+from models import SuperAdmin, SuperAdminPanel, db, PunchData, User, UserTicket, AdminLeave, AdminDoc
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask import Blueprint, request, jsonify, g
-import datetime, random, string, re, math
 from middleware import create_tokens
+from config import cloudinary
 from sqlalchemy import desc
+import cloudinary.uploader
+from datetime import datetime, date
+import datetime
+import random
+import string
+import re
+import math
+
 
 superAdminBP = Blueprint('superadmin',__name__, url_prefix='/superadmin')
 
@@ -23,6 +31,25 @@ def generate_super_id_from_last(last_super_id):
     suffix = ''.join(random.choices(string.ascii_uppercase, k=2)) + random.choice(string.digits)
     return prefix + middle + suffix
 
+def gen_empId():
+    random_letter = random.choice(string.ascii_uppercase)
+    last_user = User.query.filter(User.empId.like('%EMP%')).order_by(User.id.desc()).first()
+
+    if last_user and last_user.empId:
+        try:
+            last_number = int(last_user.empId[-4:])
+        except ValueError:
+            last_number = 0
+        new_number = last_number + 1
+    else:
+        new_number = 1
+
+    return f"{random_letter}EMP{str(new_number).zfill(4)}"
+
+
+# ====================================
+#         SUPERADMIN SECTION
+# ====================================
 
 @superAdminBP.route('/signup', methods=['POST'])
 def supAdmin_signup():
@@ -143,6 +170,82 @@ def superadmin_login():
     }), 200
 
 
+@superAdminBP.route('/mydetails', methods=['GET'])
+def get_myDetails():
+    try:
+        userId = g.user.get('userID') if g.user else None
+        if not userId:
+            return jsonify({
+                'status': 'error',
+                'message': 'No auth token provided or user not found.'
+            }), 400
+
+        superadmin = SuperAdmin.query.filter_by(id=userId).first()
+        if superadmin:
+            adminDetails = {
+                "id": superadmin.id,
+                "companyName": superadmin.companyName,
+                "companyEmail": superadmin.companyEmail,
+            }
+            return jsonify({"status": "success", "message": "Fetched Successfully", "data": adminDetails}), 200
+
+        user = User.query.filter_by(id=userId).first()
+        if not user:
+            return jsonify({"status": "error", "message": "No user found"}), 404
+
+        userDetails = {
+            "id": user.id,
+            "profileImage": user.profileImage,
+            "userName": user.userName,
+            "empId": user.empId,
+            "email": user.email,
+            "gender": user.gender,
+            "number": user.number,
+            "currentAddress": user.currentAddress,
+            "permanentAddress": user.permanentAddress,
+            "postal": user.postal,
+            "city": user.city,
+            "state": user.state,
+            "country": user.country,
+            "nationality": user.nationality,
+            "panNumber": user.panNumber,
+            "adharNumber": user.adharNumber,
+            "uanNumber": user.uanNumber,
+            "department": user.department,
+            "onBoardingStatus": user.onBoardingStatus,
+            "sourceOfHire": user.sourceOfHire,
+            "currentSalary": user.currentSalary,
+            "joiningDate": user.joiningDate.strftime('%Y-%m-%d') if user.joiningDate else None,
+            "schoolName": user.schoolName,
+            "degree": user.degree,
+            "fieldOfStudy": user.fieldOfStudy,
+            "dateOfCompletion": user.dateOfCompletion.strftime('%Y-%m-%d') if user.dateOfCompletion else None,
+            "skills": user.skills,
+            "occupation": user.occupation,
+            "company": user.company,
+            "experience": user.experience,
+            "duration": user.duration,
+            "userRole": user.userRole,
+            "created_at": user.created_at.strftime('%Y-%m-%d %H:%M:%S') if user.created_at else None
+        }
+
+        return jsonify({"status": "success", "message": "Fetched Successfully", "data": userDetails}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            'status': 'error',
+            'message': 'Internal server error',
+            'error': str(e),
+        }), 500
+
+
+
+# ====================================
+#            PUNCH SECTION
+# ====================================
+
+
 @superAdminBP.route('/all-punchdetails', methods=['GET'])
 def all_punchDetails():
     try:
@@ -253,7 +356,7 @@ def all_punchDetails():
         }), 500
 
 
-@superAdminBP.route('/edit-punchdetails/<int:punchId>',methods=['PUT'])
+@superAdminBP.route('/all-punchdetails/<int:punchId>',methods=['PUT'])
 def editPunchDetails(punchId):
     data=request.get_json()
 
@@ -305,40 +408,79 @@ def editPunchDetails(punchId):
         }),500
 
 
-@superAdminBP.route('/all-users', methods = ['GET'])
-def allUsers():
+# ====================================
+#         ALL EMPLOYEE SECTION
+# ====================================
+
+
+
+@superAdminBP.route('/all-users/<int:id>', methods=['GET'])
+def all_users_or_one(id):
     try:
         userID = g.user.get('userID') if g.user else None
         if not userID:
-            return jsonify({
-                'status': 'error',
-                'message': 'No auth or user found'
-            }), 400
+            return jsonify({'status': 'error', 'message': 'No auth or user found'}), 400
 
         superadmin = SuperAdmin.query.filter_by(id=userID).first()
         if not superadmin:
-            return jsonify({
-                'status': 'error',
-                'message': 'No admin found with this id'
-            }), 400
+            return jsonify({'status': 'error', 'message': 'No admin found with this id'}), 400
 
-        if superadmin.is_super_admin is not True:
+        if not superadmin.is_super_admin:
             user = User.query.filter_by(id=userID).first()
-            if user.userRole.lower() != 'hr':
-                return jsonify({
-                'status': 'error',
-                'message': 'Unauthorized: you dont have access to this route'
-            }), 403
+            if not user or user.userRole.lower() != 'hr':
+                return jsonify({'status': 'error', 'message': 'Unauthorized'}), 403
 
-        
         superadminpanel = superadmin.superadminPanel
         if not superadminpanel:
-            return jsonify({
-                'status': 'error',
-                'message': "No admin panel found with this user"
-            }), 400
+            return jsonify({'status': 'error', 'message': 'No admin panel found with this user'}), 400
 
         all_users_query = superadminpanel.allUsers
+
+        if id != 0:
+            single_user = next((u for u in all_users_query if u.id == id), None)
+            if not single_user:
+                return jsonify({'status': 'error', 'message': 'User not found'}), 404
+
+            user_data = {
+                'id': user.id,
+                'profileImage': user.profileImage,
+                'superadminId': user.superadminId,
+                'userName': user.userName,
+                'empId': user.empId,
+                'email': user.email,
+                'gender': user.gender,
+                'number': user.number,
+                'currentAddress': user.currentAddress,
+                'permanentAddress': user.permanentAddress,
+                'postal': user.postal,
+                'city': user.city,
+                'state': user.state,
+                'country': user.country,
+                'nationality': user.nationality,
+                'panNumber': user.panNumber,
+                'adharNumber': user.adharNumber,
+                'uanNumber': user.uanNumber,
+                'department': user.department,
+                'onBoardingStatus': user.onBoardingStatus,
+                'sourceOfHire': user.sourceOfHire,
+                'currentSalary': user.currentSalary,
+                'joiningDate': user.joiningDate.strftime("%Y-%m-%d") if user.joiningDate else None,
+                'schoolName': user.schoolName,
+                'degree': user.degree,
+                'fieldOfStudy': user.fieldOfStudy,
+                'dateOfCompletion': user.dateOfCompletion.strftime("%Y-%m-%d") if user.dateOfCompletion else None,
+                'skills': user.skills,
+                'occupation': user.occupation,
+                'company': user.company,
+                'experience': user.experience,
+                'duration': user.duration,
+                'userRole': user.userRole,
+                'managerId': user.managerId,
+                'superadmin_panel_id': user.superadmin_panel_id,
+                'created_at': user.created_at.strftime("%Y-%m-%d %H:%M:%S") if user.created_at else None
+            }
+
+            return jsonify({'status': 'success', 'user': user_data}), 200
 
         department = request.args.get('department')
         if department:
@@ -358,14 +500,41 @@ def allUsers():
         user_list = [
             {
                 'id': user.id,
+                'profileImage': user.profileImage,
+                'superadminId': user.superadminId,
                 'userName': user.userName,
-                'email': user.email,
                 'empId': user.empId,
+                'email': user.email,
+                'gender': user.gender,
+                'number': user.number,
+                'currentAddress': user.currentAddress,
+                'permanentAddress': user.permanentAddress,
+                'postal': user.postal,
+                'city': user.city,
+                'state': user.state,
+                'country': user.country,
+                'nationality': user.nationality,
+                'panNumber': user.panNumber,
+                'adharNumber': user.adharNumber,
+                'uanNumber': user.uanNumber,
                 'department': user.department,
-                'source_of_hire': user.sourceOfHire,
-                'PAN': user.panNumber,
-                'UAN': user.uanNumber,
-                'joiningDate': user.joiningDate,
+                'onBoardingStatus': user.onBoardingStatus,
+                'sourceOfHire': user.sourceOfHire,
+                'currentSalary': user.currentSalary,
+                'joiningDate': user.joiningDate.strftime("%Y-%m-%d") if user.joiningDate else None,
+                'schoolName': user.schoolName,
+                'degree': user.degree,
+                'fieldOfStudy': user.fieldOfStudy,
+                'dateOfCompletion': user.dateOfCompletion.strftime("%Y-%m-%d") if user.dateOfCompletion else None,
+                'skills': user.skills,
+                'occupation': user.occupation,
+                'company': user.company,
+                'experience': user.experience,
+                'duration': user.duration,
+                'userRole': user.userRole,
+                'managerId': user.managerId,
+                'superadmin_panel_id': user.superadmin_panel_id,
+                'created_at': user.created_at.strftime("%Y-%m-%d %H:%M:%S") if user.created_at else None
             }
             for user in paginated_users
         ]
@@ -381,89 +550,210 @@ def allUsers():
 
     except Exception as e:
         db.session.rollback()
-        return jsonify({
-            'status': 'error',
-            'message': "Internal server error",
-            'error': str(e)
-        }), 500
+        return jsonify({'status': 'error', 'message': 'Internal server error', 'error': str(e)}), 500
 
 
-@superAdminBP.route('/all-users/<int:userId>',methods=['PUT'])
+@superAdminBP.route('/all-users/<int:userId>', methods=['PUT'])
 def edit_user(userId):
-    data=request.get_json()
+    data = request.form
     if not data:
         return jsonify({
-            "status" : "error",
-            "message" : "Please provide data"
-        }), 404
-    
+            "status": "error",
+            "message": "Please provide data"
+        }), 400
+
     try:
-        userID = g.user.get('userID') if g.user else None
-        if not userID:
+        auth_user_id = g.user.get('userID') if g.user else None
+        if not auth_user_id:
             return jsonify({
-                'status' : "error",
-                "message" : "No userid or auth token provided"
-            }), 404
-        
-        superadmin = SuperAdmin.query.filter_by(id=userID).first()
+                "status": "error",
+                "message": "No auth token or user ID found"
+            }), 401
+
+        # Authorization check
+        superadmin = SuperAdmin.query.filter_by(id=auth_user_id).first()
         if not superadmin:
-            user = User.query.filter_by(id=userID).first()
-            if not user:
+            requesting_user = User.query.filter_by(id=auth_user_id).first()
+            if not requesting_user or requesting_user.userRole.lower() != 'hr':
                 return jsonify({
-                    "status" : "error",
-                    "message" : "No user or admin found"
-                }), 400
-            
-            if user.userRole.lower() != "hr":
-                return jsonify({
-                    "status" : "error",
-                    "message" : "You are not allowed to edit this role"
-                }), 409
-        
+                    "status": "error",
+                    "message": "Not authorized to update users"
+                }), 403
+
+        # Get the user to update
         user = User.query.filter_by(id=userId).first()
         if not user:
             return jsonify({
-                "status" : "error",
-                "message" : "No user found with this Id"
-            }), 409
-        
+                "status": "error",
+                "message": "User not found"
+            }), 404
+
+        # Define fields
         updatable_fields = [
-            'profileImage', 'userName', 'gender', 'number','userRole',
+            'profileImage', 'userName', 'gender', 'number', 'userRole',
             'currentAddress', 'permanentAddress', 'postal', 'city',
-            'state', 'country', 'nationality', 'panNumber',
-            'adharNumber', 'uanNumber', 'department', 'onBoardingStatus',
-            'sourceOfHire', 'currentSalary', 'joiningDate', 'schoolName',
-            'degree', 'fieldOfStudy', 'dateOfCompletion', 'skills',
-            'occupation', 'company', 'experience', 'duration'
+            'state', 'country', 'nationality', 'panNumber', 'adharNumber',
+            'uanNumber', 'department', 'onBoardingStatus', 'sourceOfHire',
+            'currentSalary', 'joiningDate', 'schoolName', 'degree',
+            'fieldOfStudy', 'dateOfCompletion', 'skills', 'occupation',
+            'company', 'experience', 'duration'
         ]
+
+        # Field type groups
+        integer_fields = ['currentSalary', 'experience']
+        date_fields = ['dateOfCompletion']
+        datetime_fields = ['joiningDate']
+        string_fields = [
+            'profileImage', 'userName', 'gender', 'number', 'currentAddress', 
+            'permanentAddress', 'postal', 'city', 'state', 'country', 'nationality',
+            'panNumber', 'adharNumber', 'uanNumber', 'department', 'onBoardingStatus',
+            'sourceOfHire', 'schoolName', 'degree', 'fieldOfStudy', 'occupation',
+            'company', 'duration', 'userRole'
+        ]
+        text_fields = ['skills']
 
         for field in updatable_fields:
             if field in data:
-                if field == 'joiningDate' or field == 'dateOfCompletion':
+                value = data[field]
+
+                # Handle empty string as None
+                if value == '':
+                    setattr(user, field, None)
+                    continue
+
+                if field in datetime_fields:
                     try:
-                        setattr(user, field, datetime.strptime(data[field], '%Y-%m-%d').date())
+                        setattr(user, field, date.fromisoformat(value))
+                    except ValueError:
+                        return jsonify({
+                            'status': 'error',
+                            'message': f'Invalid datetime format for {field}. Use YYYY-MM-DD or full ISO format.'
+                        }), 400
+
+                elif field in date_fields:
+                    try:
+                        setattr(user, field, date.fromisoformat(value))
                     except ValueError:
                         return jsonify({
                             'status': 'error',
                             'message': f'Invalid date format for {field}. Use YYYY-MM-DD.'
                         }), 400
-                else:
-                    setattr(user, field, data[field])
+
+                elif field in integer_fields:
+                    try:
+                        setattr(user, field, int(value))
+                    except ValueError:
+                        return jsonify({
+                            'status': 'error',
+                            'message': f'{field} must be a valid integer.'
+                        }), 400
+
+                elif field in string_fields or field in text_fields:
+                    setattr(user, field, value)
 
         db.session.commit()
 
         return jsonify({
-            'status': 'success',
-            'message': 'User details updated successfully.'
+            "status": "success",
+            "message": "User updated successfully"
         }), 200
-        
+
     except Exception as e:
         db.session.rollback()
         return jsonify({
-            'status' : "error",
-            "message" : "Internal Server Error",
-            "error" : str(e)
+            "status": "error",
+            "message": "Internal server error",
+            "error": str(e)
         }), 500
+
+@superAdminBP.route('/all-users', methods=['POST'])
+def employeeCreation():
+    data = request.form
+
+    required_fields = ['userName', 'email', 'password', 'userRole']
+    if not all(field in data for field in required_fields):
+        return jsonify({'error': 'Missing required fields'}), 400
+
+    email = data.get('email')
+
+    if User.query.filter_by(email=email).first():
+        return jsonify({'error': 'User already exists'}), 409
+
+    try:
+        userID = g.user.get('userID') if g.user else None
+        if not userID:
+            return jsonify({"status": "error", "message": "No user or auth token"}), 400
+
+        superadmin = SuperAdmin.query.filter_by(id=userID).first()
+        if superadmin:
+            panel_id = superadmin.superadminPanel.id
+            super_id = superadmin.superId
+            superadminID = super_id  # ✅ Assign superadminID
+        else:
+            user = User.query.filter_by(id=userID).first()
+            if not user or user.userRole.lower() != 'hr':
+                return jsonify({"status": "error", "message": "You are not allowed to manage this"}), 403
+            superadminID = user.superadminId
+
+        superadminPanel = SuperAdmin.query.filter_by(superId=superadminID).first()
+        if not superadminPanel:
+            return jsonify({"status": "error", "message": "No admin found"}), 404
+
+        newUser = User(
+            superadminId=superadminID,
+            userName=data.get('userName'),
+            email=data.get('email'),
+            password=generate_password_hash(data.get('password')),
+            userRole=data.get('userRole'),
+            gender=data.get('gender'),
+            empId=gen_empId(),
+            superadmin_panel_id=panel_id if superadmin else superadminPanel.id,
+        )
+
+        db.session.add(newUser)
+        db.session.commit()
+
+        return jsonify({"status": "success", "message": "Added Successfully"}), 201
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"status": "error", "message": "Internal Server Error", "error": str(e)}), 500
+
+
+@superAdminBP.route('/all-users/<int:id>', methods=['DELETE'])
+def editEmployee(id):
+    try:
+        userID = g.user.get('userID') if g.user else None
+        if not userID:
+            return jsonify({"status" :"error" , "message" : "No user or auth token"}), 400
+        
+        superadmin = SuperAdmin.query.filter_by(id=userID).first()
+        if superadmin:
+            super_id = superadmin.superId
+        else:
+            user = User.query.filter_by(id=userID).first()
+            if not user or user.userRole.lower() != 'hr':
+                return jsonify({"status": "error", "message": "You are not allowed to manage this"}), 403
+            
+        user = User.query.filter_by(id=id).first()
+        if not user:
+            return jsonify({"status" : "error", "message" : "No user found"}),409
+        
+        db.session.delete(user)
+        db.session.commit()
+        
+        return jsonify({"status" : "success", "message" : "Deleted successfully"}),200
+            
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"status" : "error", "message" : "Internal Server Error", "error" : str(e)})
+
+
+
+# ====================================
+#         USER TICKET SECTION
+# ====================================
+
 
 
 @superAdminBP.route('/getTickets', methods=['GET'])
@@ -653,6 +943,11 @@ def editTicket(ticket_id):
         }), 500
 
 
+# ====================================
+#         USER LEAVE SECTION
+# ====================================
+
+
 @superAdminBP.route('/all_leaves', methods=['GET'])
 def user_leaves():
     try:
@@ -732,7 +1027,7 @@ def user_leaves():
             "message": "Internal Server Error",
             "error": str(e)
         }), 500
-    
+
 
 @superAdminBP.route('/leave', methods=['POST'])
 def leaveDetails():
@@ -854,7 +1149,7 @@ def get_leaveDetails():
     except Exception as e:
         db.session.rollback()
         return jsonify({"status" : "error", "message" : "Internal server error", "error" : str(e)}), 500
-    
+
 
 @superAdminBP.route('/leave/<int:id>', methods=['DELETE'])
 def deleteLeave(id):
@@ -890,68 +1185,171 @@ def deleteLeave(id):
         }), 500
 
 
-@superAdminBP.route('/employee', methods=['POST'])   #pending
-def employeeCreation():
-    data = request.get_json()
 
-    required_fields = ['userName', 'email', 'password', 'userRole', 'gender']
-    if not all(field in data for field in required_fields):
-        return jsonify({'error': 'Missing required fields'}), 400
+# ====================================
+#          USER DOCUMENT SECTION
+# ====================================
 
-    email = data['email']
 
-    if User.query.filter_by(email=email).first():
-        return jsonify({'error': 'User already exists'}), 409
+@superAdminBP.route('/documents', methods=['POST'])
+def documents():
+    title = request.form.get('title', '')
+    files = request.files.get('document')
     try:
         userID = g.user.get('userID') if g.user else None
         if not userID:
-            return jsonify({"status" :"error" , "message" : "No user or auth token"}), 400
+            return jsonify({"status" : "error", "message" : "No user id or auth token provided"}), 400
         
         superadmin = SuperAdmin.query.filter_by(id=userID).first()
-        if superadmin:
-            panel_id = superadmin.superadminPanel.id
-            super_id = superadmin.superId
-        else:
-            user = User.query.filter_by(id=userID).first()
-            if not user or user.userRole.lower() != 'hr':
-                return jsonify({"status": "error", "message": "You are not allowed to manage this"}), 403
-            
-
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({"status" : "error", "message" : "Internal Server Error", "error" : str(e)}), 500
-    
-
-@superAdminBP.route('/all-users/<int:id>', methods=['DELETE'])
-def editEmployee(id):
-    try:
-        userID = g.user.get('userID') if g.user else None
-        if not userID:
-            return jsonify({"status" :"error" , "message" : "No user or auth token"}), 400
+        if not superadmin:
+            return jsonify({"status" : "error", "message" : "No superadmin found"}), 404
         
-        superadmin = SuperAdmin.query.filter_by(id=userID).first()
-        if superadmin:
-            panel_id = superadmin.superadminPanel.id
-            super_id = superadmin.superId
-        else:
-            user = User.query.filter_by(id=userID).first()
-            if not user or user.userRole.lower() != 'hr':
-                return jsonify({"status": "error", "message": "You are not allowed to manage this"}), 403
-            
-        user = User.query.filter_by(id=id).first()
-        if not user:
-            return jsonify({"status" : "error", "message" : "No user found"}),409
-        
-        db.session.delete(user)
+        superpanelD = superadmin.superadminPanel.id
+
+        result = cloudinary.uploader.upload(files)
+        doc_url = result.get("secure_url")
+
+        adminDocs = AdminDoc(
+            superadminPanel= superpanelD,
+            document = doc_url,
+            title = title
+        )
+
+        db.session.add(adminDocs)
         db.session.commit()
-        
-        return jsonify({"status" : "success", "message" : "Deleted successfully"}),200
-            
+
+        return jsonify({"status" : "success", "message" : "Uploaded successfully", "document" : {"doc_url" : doc_url, "title" : title}}),201
+
+    except Exception as e:
+        return jsonify({"status" : "error", "message" : "Internal Server Error", "error" : str(e)}), 500
+
+
+@superAdminBP.route('/documents/<int:id>', methods=['PUT'])
+def edit_document(id):
+    try:
+        userID = g.user.get('userID') if g.user else None
+        if not userID:
+            return jsonify({"status": "error", "message": "No user or auth token provided"}), 404
+
+        superadmin = SuperAdmin.query.filter_by(id=userID).first()
+        if not superadmin:
+            return jsonify({"status": "error", "message": "No superadmin found"}), 404
+
+        adminDocs = AdminDoc.query.filter_by(id=id).first()
+        if not adminDocs:
+            return jsonify({"status": "error", "message": "No Admin documents found with these details"}), 409
+
+        title = request.form.get('title')
+        document = request.files.get('documents')
+
+        if title:
+            adminDocs.title = title
+
+        if document:
+            result = cloudinary.uploader.upload(document)
+            doc_url = result.get('secure_url')
+            adminDocs.document = doc_url
+
+        db.session.commit()
+
+        return jsonify({"status": "success", "message": "Updated Successfully"}), 200
+
     except Exception as e:
         db.session.rollback()
-        return jsonify({"status" : "error", "message" : "Internal Server Error", "error" : str(e)})
+        return jsonify({"status": "error", "message": "Internal Server Error", "error": str(e)}), 500
 
 
-@superAdminBP.route('/route_name')
-def method_name():
-    pass
+@superAdminBP.route('/documents', methods=['GET'])
+def document_details():
+    try:
+        userID = g.user.get('userID') if g.user else None
+        if not userID:
+            return jsonify({"status": "error", "message": "No user or auth token provided"}), 400
+
+        superadmin = SuperAdmin.query.filter_by(id=userID).first()
+        if not superadmin or not superadmin.superadminPanel:
+            return jsonify({"status": "error", "message": "No superadmin found or panel missing"}), 404
+
+        admindocs = superadmin.superadminPanel.id
+
+        page = int(request.args.get('page', 1))
+        limit = int(request.args.get('limit', 10))
+
+        pagination = AdminDoc.query.filter_by(superadminPanel=admindocs).paginate(page=page, per_page=limit, error_out=False)
+
+        documentList = [
+            {
+                "id" : doc.id,
+                "documents": doc.document,
+                "title": doc.title
+            }
+            for doc in pagination.items
+        ]
+
+        return jsonify({
+            "status": "success",
+            "message": "Fetched successfully",
+            "documents": documentList,
+            "total": pagination.total,
+            "page": pagination.page,
+            "limit": pagination.per_page,
+            "pages": pagination.pages
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"status": "error", "message": "Internal Server Error", "error": str(e)}), 500
+
+
+@superAdminBP.route('/documents/<int:id>', methods=['DELETE'])
+def delete_details(id):
+    try:
+        userID = g.user.get('userID') if g.user else None
+        if not userID:
+            return jsonify({"status": "error", "message": "No user or auth token provided"}), 400
+
+        superadmin = SuperAdmin.query.filter_by(id=userID).first()
+        if not superadmin or not superadmin.superadminPanel:
+            return jsonify({"status": "error", "message": "No superadmin found or panel missing"}), 404
+        
+        adminDocs = AdminDoc.query.filter_by(id=id).first()
+        if not adminDocs:
+            return jsonify({"status": "error", "message": "No Docs found"}), 400
+        
+        db.session.delete(adminDocs)
+        db.session.commit()
+
+        return jsonify({
+            "status": "success",
+            "message": "Deleted successfully",
+        }), 200
+    
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"status": "error", "message": "Internal Server Error", "error": str(e)}), 500
+
+
+# ====================================
+#            ANNOUNCE SECTION
+# ====================================
+
+
+@superAdminBP.route('/announcement', methods=['POST'])
+def create_announcement():
+    try:
+        userID = g.user.get('userID') if g.user else None
+        if not userID:
+            return jsonify({
+                "status": "error",
+                "message": "No user ID or auth token provided"
+            }), 404
+
+        superadmin = SuperAdmin.query.filter_by(id=userID).first()
+        if not superadmin:
+            user = User.query.filter_by(id=userID).first()
+            if not user or user.userRole.lower() != 'hr':
+                return jsonify({"status": "error", "message": "You are not allowed to manage this."}), 400
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"status" : "error", "message" : "Internal Server Error", "error" : str(e)}),500

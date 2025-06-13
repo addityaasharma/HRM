@@ -1,9 +1,11 @@
-from models import User,UserPanelData,db,SuperAdmin,PunchData, UserTicket, UserDocument
+from models import User,UserPanelData,db,SuperAdmin,PunchData, UserTicket, UserDocument, UserChat
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask import Blueprint, request, json, jsonify, g
 from otp_utils import generate_otp, send_otp
 from middleware import create_tokens
 from datetime import datetime,time
+from flask_socketio import join_room, emit
+from socket_instance import socketio
 from dotenv import load_dotenv
 from config import cloudinary
 import cloudinary.uploader
@@ -796,3 +798,136 @@ def salary_details():
     except Exception as e:
         db.session.rollback()
         return jsonify({"status" : "error", "message" : "Internal Server Error", "error" : str(e)}), 500
+
+
+@user.route('/colleagues/<int:id>', methods=['GET'])
+def all_users(id):
+    try:
+        userID = g.user.get('userID') if g.user else None
+        if not userID:
+            return jsonify({"status": "error", "message": "No user or auth token provided"}), 400
+
+        user = User.query.filter_by(id=userID).first()
+        if not user or not user.superadminId:
+            return jsonify({"status": "error", "message": "No user or Admin found"}), 409
+
+        adminID = user.superadminId
+        superadmin = SuperAdmin.query.filter_by(superId=adminID).first()
+        if not superadmin or not superadmin.superadminPanel or not superadmin.superadminPanel.allUsers:
+            return jsonify({"status": "error", "message": "No Admin or users found associated with you"}), 404
+
+        all_users = superadmin.superadminPanel.allUsers
+
+        if id != 0:
+            user_detail = next((u for u in all_users if u.id == id), None)
+            if not user_detail:
+                return jsonify({"status": "error", "message": "User not found"}), 404
+
+            return jsonify({
+                "status": "success",
+                "user": {
+                    'id': user_detail.id,
+                    'userName': user_detail.userName,
+                    'email': user_detail.email,
+                    'empId': user_detail.empId,
+                    'department': user_detail.department,
+                    'source_of_hire': user_detail.sourceOfHire,
+                    'PAN': user_detail.panNumber,
+                    'UAN': user_detail.uanNumber,
+                    'joiningDate': user_detail.joiningDate
+                }
+            }), 200
+
+        page = int(request.args.get('page', 1))
+        limit = int(request.args.get('limit', 10))
+        start = (page - 1) * limit
+        end = start + limit
+        total_users = len(all_users)
+        paginated_users = all_users[start:end]
+
+        userList = []
+        for u in paginated_users:
+            userList.append({
+                'id': u.id,
+                'userName': u.userName,
+                'email': u.email,
+                'empId': u.empId,
+                'department': u.department,
+                'source_of_hire': u.sourceOfHire,
+                'PAN': u.panNumber,
+                'UAN': u.uanNumber,
+                'joiningDate': u.joiningDate
+            })
+
+        return jsonify({
+            "status": "success",
+            "message": "Fetched successfully",
+            "page": page,
+            "limit": limit,
+            "total_users": total_users,
+            "total_pages": (total_users + limit - 1) // limit,
+            "users": userList
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"status": "error", "message": "Internal Server Error", "error": str(e)}), 500
+
+
+@user.route('/message', methods=['POST'])
+def send_message():
+    try:
+        userID = g.user.get('userID') if g.user else None
+        if not userID:
+            return jsonify({"status": "error", "message": "No user or auth token provided"}), 404
+
+        user = User.query.filter_by(id=userID).first()
+        if not user:
+            return jsonify({"status": "error", "message": "User not found"}), 400
+
+        if not user.panelData:
+            return jsonify({"status": "error", "message": "Panel data not found"}), 404
+
+        data = request.get_json()
+        required_fields = ['recieverID', 'message']
+        if not all(field in data for field in required_fields):
+            return jsonify({"status": "error", "message": "All fields are required"}), 400
+
+        recieverId = data['recieverID']
+        message_text = data['message']
+
+        reciever = User.query.filter_by(empId=recieverId).first()
+        if not reciever:
+            return jsonify({"status": "error", "message": "Receiver not found"}), 404
+
+        superadmin = SuperAdmin.query.filter_by(superId=reciever.superadminId).first()
+        if not superadmin:
+            return jsonify({"status": "error", "message": "Receiver not found"}), 400
+
+        message = UserChat(
+            panelData=user.panelData.id,
+            senderID=user.empId,
+            recieverID=recieverId,
+            message=message_text,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow()
+        )
+
+        db.session.add(message)
+        db.session.commit()
+
+        socketio.emit('receive_message', {
+            'senderID': user.empId,
+            'recieverID': recieverId,
+            'message': message_text,
+            'timestamp': str(message.created_at)
+        }, room=recieverId)
+
+        socketio.emit('message_sent', {'status': 'success'}, room=user.empId)
+
+        return jsonify({"status": "success", "message": "Message sent"}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"status": "error", "message": "Internal Server Error", "error": str(e)}), 500
+
