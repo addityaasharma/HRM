@@ -328,6 +328,7 @@ def all_punchDetails():
         for punch in paginated_data.items:
             punch_list.append({
                 'id': punch.id,
+                'image': punch.image,
                 'empId': punch.empId,
                 'name': punch.name,
                 'email': punch.email,
@@ -1701,40 +1702,38 @@ def get_bonus():
             return jsonify({"status": "error", "message": "No user or auth token provided"}), 404
 
         superadmin = SuperAdmin.query.filter_by(id=userID).first()
-
-        if superadmin:
-            superpanelid = superadmin.superadminPanel.id
-        else:
+        if not superadmin:
             user = User.query.filter_by(id=userID).first()
-            if not user or user.userRole.lower() != 'hr':
-                return jsonify({"status": "error", "message": "Unauthorized"}), 403
-
-            userSuperAdmin = SuperAdmin.query.filter_by(superId=user.superadminId).first()
-            if not userSuperAdmin:
-                user = User.query.filter_by(id=userID).first()
-                if not user or user.userRole.lower() != 'hr':
-                    return jsonify({"status": "error", "message": "Unauthorized"}), 403
-
-        bonus_policy  = userSuperAdmin.superadminPanel.adminBonusPolicy
-        bonus_list = []
-
-        for bonus in bonus_policy:
-            bonus_list.append({
-                "amount" : bonus.amount,
-                "bonus_method" : bonus.bonus_method,
-                "bonus_name" : bonus.bonus_name,
-                "employeement_type" : bonus.employeement_type,
-                "department_type" : bonus.department_type,
-            })
-        if not bonus_policy:
+            usersadmin = SuperAdmin.query.filter_by(superId=user.superadminId).first()
+            if not user or not usersadmin:
+                return jsonify({
+                    "status" : "success",
+                    "message" : "Unauthorized",
+                }), 409
+        
+        bonus = superadmin.superadminPanel.adminBonusPolicy if superadmin.superadminPanel.adminBonusPolicy else usersadmin.superadminPanel.adminBonusPolicy
+        if not bonus:
             return jsonify({
-                "status": "error",
-                "message": "No bonus policy found"
-            }), 404
+                "status" : "error",
+                "message" : "No leaves found"
+            }), 200
+        
+
+        bonusList= []
+        for bonuss in bonus:
+            bonusList.append({
+                "id" : bonuss.id,
+                "name" : bonuss.bonus_name,
+                "method" : bonuss.bonus_method,
+                "amount" : bonuss.amount,
+                "applyOn" : bonuss.apply,
+                "department_type" : bonuss.department_type,
+                "employeement_type" : bonuss.employeement_type,
+            })
 
         return jsonify({
             "status": "success",
-            "data": bonus_list,
+            "data": bonusList,
         }), 200
 
     except Exception as e:
@@ -1754,7 +1753,7 @@ def edit_bonus(id):
             "message": "No data provided"
         }), 400
 
-    allowed_fields = ['bonus_name', 'bonus_description', 'bonus_methods', 'amount']
+    allowed_fields = ['bonus_name', 'apply',"bonus_method", 'amount', 'employeement_type', 'department_type']
     if not any(field in data for field in allowed_fields):
         return jsonify({
             "status": "error",
@@ -1791,12 +1790,16 @@ def edit_bonus(id):
 
         if 'bonus_name' in data:
             bonuspolicy.bonus_name = data['bonus_name']
-        if 'bonus_description' in data:
-            bonuspolicy.bonus_description = data['bonus_description']
+        if 'apply' in data:
+            bonuspolicy.apply = data['apply']
         if 'bonus_methods' in data:
-            bonuspolicy.bonus_methods = data['bonus_methods']
+            bonuspolicy.bonus_method = data['bonus_method']
         if 'amount' in data:
             bonuspolicy.amount = int(data['amount'])
+        if 'employeement_type' in data:
+            bonuspolicy.employeement_type = int(data['employeement_type'])
+        if 'department_type' in data:
+            bonuspolicy.department_type = int(data['department_type'])
 
         db.session.commit()
 

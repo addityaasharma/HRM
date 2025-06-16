@@ -329,6 +329,7 @@ class PunchData(db.Model):
     __tablename__ = 'punchdata'
     id = db.Column(db.Integer, primary_key=True)
     panelData = db.Column(db.Integer, db.ForeignKey('userpaneldata.id'),nullable=False)
+    image = db.Column(db.String(512))
     empId = db.Column(db.String(120),nullable=False)
     name = db.Column(db.String(200))
     email = db.Column(db.String(200))

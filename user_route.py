@@ -191,7 +191,6 @@ def user_login():
 #          USER PUNCH SECTION
 # ====================================
 
-
 @user.route('/punchin', methods=['POST'])
 def punch_details():
     try:
@@ -202,7 +201,7 @@ def punch_details():
                 'message': 'No input data provided'
             }), 400
 
-        required_fields = ['login', 'location']
+        required_fields = ['login', 'location', 'image']
         if not all(field in data for field in required_fields):
             return jsonify({
                 'status': 'error',
@@ -230,6 +229,17 @@ def punch_details():
                 'message': 'No user panel data found'
             }), 404
 
+        image_data = data.get('image')
+        try:
+            upload_result = cloudinary.uploader.upload(image_data)
+            image_url = upload_result.get('secure_url')
+        except Exception as e:
+            return jsonify({
+                'status': 'error',
+                'message': 'Failed to upload image to Cloudinary',
+                'error': str(e)
+            }), 500
+
         try:
             login_time = datetime.fromisoformat(data.get('login'))
         except Exception:
@@ -249,7 +259,8 @@ def punch_details():
             totalhour=None,
             productivehour=None,
             shift=None,
-            status="present"
+            status="present",
+            image=image_url
         )
 
         db.session.add(punchin)
@@ -258,7 +269,8 @@ def punch_details():
         return jsonify({
             'status': 'success',
             'message': 'Punch-in successful',
-            'punch_id': punchin.id
+            'punch_id': punchin.id,
+            'image_url': image_url
         }), 201
 
     except Exception as e:
@@ -305,6 +317,7 @@ def get_punchDetails():
         for punch in punchdetails:
             punch_list.append({
                 "id": punch.id,
+                "image": punch.image,
                 "empId": punch.empId,
                 "name": punch.name,
                 "email": punch.email,
