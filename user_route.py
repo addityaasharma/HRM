@@ -12,7 +12,7 @@ from config import cloudinary
 import cloudinary.uploader
 from redis import Redis
 import random,os
-import string
+import string, math
 
 
 user = Blueprint('user',__name__, url_prefix='/user')
@@ -411,9 +411,79 @@ def edit_punchDetails(punchId):
 #        USER DETAILS SECTION
 # ====================================
 
+@user.route('/profile', methods=['GET'])
+def get_Profile():
+    try:
+        userId = g.user.get('userID') if g.user else None
+        if not userId:
+            return jsonify({
+                "status": "error",
+                "message": "No user ID or auth token provided",
+            }), 400
 
-@user.route('/edit_details', methods=['PUT'])
-def edit_details():
+        user = User.query.filter_by(id=userId).first()
+        if not user:
+            return jsonify({
+                "status": "error",
+                "message": "No user found"
+            }), 404
+
+        userDetails = {
+            'id': user.id,
+            'profileImage': user.profileImage,
+            'superadminId': user.superadminId,
+            'userName': user.userName,
+            'empId': user.empId,
+            'email': user.email,
+            'gender': user.gender,
+            'number': user.number,
+            'currentAddress': user.currentAddress,
+            'permanentAddress': user.permanentAddress,
+            'postal': user.postal,
+            'city': user.city,
+            'state': user.state,
+            'country': user.country,
+            'nationality': user.nationality,
+            'panNumber': user.panNumber,
+            'adharNumber': user.adharNumber,
+            'uanNumber': user.uanNumber,
+            'department': user.department,
+            'onBoardingStatus': user.onBoardingStatus,
+            'sourceOfHire': user.sourceOfHire,
+            'currentSalary': user.currentSalary,
+            'joiningDate': user.joiningDate.strftime("%Y-%m-%d") if user.joiningDate else None,
+            'schoolName': user.schoolName,
+            'degree': user.degree,
+            'fieldOfStudy': user.fieldOfStudy,
+            'dateOfCompletion': user.dateOfCompletion.strftime("%Y-%m-%d") if user.dateOfCompletion else None,
+            'skills': user.skills,
+            'occupation': user.occupation,
+            'company': user.company,
+            'experience': user.experience,
+            'duration': user.duration,
+            'userRole': user.userRole,
+            'managerId': user.managerId,
+            'superadmin_panel_id': user.superadmin_panel_id,
+            'created_at': user.created_at.strftime("%Y-%m-%d %H:%M:%S") if user.created_at else None
+        }
+
+        return jsonify({
+            "status": "success",
+            "message": "Fetched successfully",
+            "data": userDetails
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e)
+        }), 500
+
+
+@user.route('/profile', methods=['PUT'])
+def edit_Profile():
     try:
         userId = g.user.get('userID') if g.user else None
         if not userId:
@@ -480,7 +550,7 @@ def edit_details():
 # ====================================
 
 
-@user.route('/raise_ticket', methods=['POST'])
+@user.route('/ticket', methods=['POST'])
 def raise_ticket():
     data = request.get_json()
     if not data:
@@ -547,7 +617,7 @@ def raise_ticket():
         }), 500
 
 
-@user.route('/get_ticket', methods=['GET'])
+@user.route('/ticket', methods=['GET'])
 def get_ticket():
     try:
         userID = g.user.get('userID') if g.user else None
@@ -972,6 +1042,7 @@ def send_message():
 @user.route('/leave', methods=['POST'])
 def request_leave():
     data = request.get_json()
+    print(f"This is data: {data}")
     if not data:
         return jsonify({"message": "No data provided", "status": "error"}), 400
 
@@ -992,10 +1063,12 @@ def request_leave():
         if not superadmin:
             return jsonify({"status": "error", "message": "Leave policy not set by admin"}), 409
 
-        adminLeaveDetails = superadmin.superadminPanel.adminLeave
+        # FIX: Check if adminLeave list exists and is not empty
+        if not hasattr(superadmin.superadminPanel, 'adminLeave') or not superadmin.superadminPanel.adminLeave:
+            return jsonify({'status': "error", "message": "Admin has not configured any leave policies"}), 404
+        
+        adminLeaveDetails = superadmin.superadminPanel.adminLeave[0]
         print(adminLeaveDetails)
-        if not adminLeaveDetails:
-            return jsonify({'status' : "error"}), 404
 
         # Date parsing
         leaveStart = datetime.strptime(data['leavefrom'], "%Y-%m-%d").date()
@@ -1211,7 +1284,7 @@ def request_leave():
     except Exception as e:
         db.session.rollback()
         return jsonify({"status": "error", "message": "Internal Server Error", "error": str(e)}), 500
-    
+
 
 @user.route('/leave', methods=['GET'])
 def get_leave_details():
@@ -1224,16 +1297,28 @@ def get_leave_details():
         if not user:
             return jsonify({"status": "error", "message": "User not found"}), 404
 
-        leavedetails = user.panelData.userLeaveData
+        # Pagination & filtering inputs
+        page = request.args.get('page', default=1, type=int)
+        limit = request.args.get('limit', default=10, type=int)
+        status = request.args.get('status', type=str)
+        offset = (page - 1) * limit
 
-        if not leavedetails:
-            return jsonify({"status": "error", "message": "No leave records found"}), 200
+        all_leaves = user.panelData.userLeaveData
+        if status:
+            all_leaves = [leave for leave in all_leaves if leave.status == status]
 
-        total_days = sum([leave.days for leave in leavedetails])
-        unpaid_total = sum([leave.unpaidDays for leave in leavedetails if leave.unpaidDays])
+        all_leaves = sorted(all_leaves, key=lambda x: x.createdAt or datetime.min, reverse=True)
+
+        total_records = len(all_leaves)
+        total_pages = math.ceil(total_records / limit)
+
+        total_days = sum([leave.days for leave in all_leaves])
+        unpaid_total = sum([leave.unpaidDays for leave in all_leaves if leave.unpaidDays])
+
+        paginated_leaves = all_leaves[offset:offset + limit]
 
         leave_list = []
-        for leave in leavedetails:
+        for leave in paginated_leaves:
             leave_list.append({
                 "id": leave.id,
                 "leaveType": leave.leavetype,
@@ -1243,7 +1328,7 @@ def get_leave_details():
                 "unpaidDays": leave.unpaidDays,
                 "status": leave.status,
                 "reason": leave.reason,
-                "appliedOn": leave.created_at.strftime('%Y-%m-%d') if hasattr(leave, 'created_at') and leave.created_at else None
+                "appliedOn": leave.createdAt.strftime('%Y-%m-%d') if leave.createdAt else 'By Mistake'
             })
 
         return jsonify({
@@ -1252,7 +1337,13 @@ def get_leave_details():
             "summary": {
                 "totalLeaves": total_days,
                 "unpaidLeaves": unpaid_total,
-                "recordCount": len(leave_list)
+                "recordCount": total_records
+            },
+            "pagination": {
+                "page": page,
+                "limit": limit,
+                "totalPages": total_pages,
+                "hasMore": page < total_pages
             },
             "data": leave_list
         }), 200

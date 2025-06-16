@@ -1,4 +1,4 @@
-from models import SuperAdmin, SuperAdminPanel, db, PunchData, User, UserTicket, AdminLeave, AdminDoc, Announcement, PollOption, AdminLeave, BonusPolicy
+from models import SuperAdmin, SuperAdminPanel, db, PunchData, User, UserTicket, AdminLeave, AdminDoc, Announcement, PollOption, AdminLeave, BonusPolicy, UserLeave, UserPanelData
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask import Blueprint, request, jsonify, g
 from middleware import create_tokens
@@ -7,7 +7,7 @@ from config import cloudinary
 from sqlalchemy import desc
 from dateutil import parser
 import cloudinary.uploader
-import datetime
+from datetime import datetime
 import random
 import string
 import re
@@ -747,12 +747,9 @@ def editEmployee(id):
         db.session.rollback()
         return jsonify({"status" : "error", "message" : "Internal Server Error", "error" : str(e)})
 
-
-
 # ====================================
 #         USER TICKET SECTION         
 # ====================================
-
 
 
 @superAdminBP.route('/getTickets', methods=['GET'])
@@ -943,7 +940,7 @@ def editTicket(ticket_id):
 
 
 # ====================================
-#         ADMIN LEAVE SECTION         
+#     USER LEAVE CONTROL SECTION         
 # ====================================
 
 
@@ -954,70 +951,122 @@ def user_leaves():
         if not userID:
             return jsonify({
                 "status": "error",
-                "message": "No user ID or auth token provided"
+                "message": "No auth token"
             }), 404
 
+        # Pagination and filters
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 10, type=int)
+        status_filter = request.args.get('status', '').strip().lower()
+        department_filter = request.args.get('department', '').strip().lower()
+
+        if page < 1:
+            page = 1
+        if per_page < 1 or per_page > 100:
+            per_page = 10
+
         superadmin = SuperAdmin.query.filter_by(id=userID).first()
-        if not superadmin:
+        panel_users = None
+
+        if superadmin:
+            panel_users = superadmin.superadminPanel.allUsers
+        else:
             user = User.query.filter_by(id=userID).first()
             if not user or user.userRole.lower() != 'hr':
-                return jsonify({"status": "error", "message": "You are not allowed to manage this."}), 400
+                return jsonify({
+                    "status": "error",
+                    "message": "You are not authorized"
+                }), 403
 
-        page = int(request.args.get('page', 1))
-        limit = int(request.args.get('limit', 10))
-        status = request.args.get('status') 
-        department = request.args.get('department')
+            if not user.superadminId:
+                return jsonify({
+                    "status": "error",
+                    "message": "No superadmin assigned to HR"
+                }), 404
 
-        query = User.query.filter_by(superadminId=superadmin.id)
+            assigned_admin = SuperAdmin.query.filter_by(superId=user.superadminId).first()
+            if not assigned_admin or not assigned_admin.superadminPanel:
+                return jsonify({
+                    "status": "error",
+                    "message": "No superadmin panel found"
+                }), 404
 
-        if department:
-            query = query.filter(User.department.ilike(f"%{department}%"))
+            panel_users = assigned_admin.superadminPanel.allUsers
 
-        total_users = query.count()
-        users = query.offset((page - 1) * limit).limit(limit).all()
-
-        results = []
-
-        for user in users:
-            if user.panelData and user.panelData.userLeaveData:
-                filtered_leaves = [
-                    {
-                        "leaveId": leave.id,
-                        "type": leave.leavetype,
-                        "from": leave.leavefrom,
-                        "to": leave.leaveto,
-                        "status": leave.status,
-                        "reason": leave.reason,
-                        "empId": leave.empId,
-                        "email": leave.email,
-                        "day": leave.day,
-                        "month": leave.month
-                    }
-                    for leave in user.panelData.userLeaveData
-                    if not status or leave.status.lower() == status.lower()
-                ]
-                if filtered_leaves:
-                    results.append({
-                        "userId": user.id,
-                        "userName": user.userName,
-                        "department": user.department,
-                        "leaves": filtered_leaves
-                    })
-
-        if not results:
+        if not panel_users:
             return jsonify({
                 "status": "error",
-                "message": "No leave data found for given filters"
-            }), 409
+                "message": "No users found in panel"
+            }), 404
+
+        all_leaves = []
+        for user in panel_users:
+            if not user.panelData:
+                continue
+
+            for leave in user.panelData.userLeaveData:
+                # Apply filters before appending
+                if status_filter and leave.status and leave.status.lower() != status_filter:
+                    continue
+                if department_filter and user.department and user.department.lower() != department_filter:
+                    continue
+
+                all_leaves.append({
+                    "userId": user.id,
+                    "userName": user.userName,
+                    "leaveId" : leave.id,
+                    "empId": leave.empId,
+                    "department": user.department,
+                    "leaveType": leave.leavetype,
+                    "leaveFrom": leave.leavefrom.strftime('%Y-%m-%d') if leave.leavefrom else None,
+                    "leaveTo": leave.leaveto.strftime('%Y-%m-%d') if leave.leaveto else None,
+                    "status": leave.status,
+                    "reason": leave.reason,
+                    "days": leave.days,
+                    "unpaidDays": leave.unpaidDays,
+                    "appliedOnRaw": leave.createdAt,
+                })
+
+        if not all_leaves:
+            return jsonify({
+                "status": "error",
+                "message": "No leave records found"
+            }), 404
+
+        # Sort by applied date descending
+        all_leaves.sort(key=lambda x: x["appliedOnRaw"] or datetime.min, reverse=True)
+
+        # Total and pagination logic
+        total_leaves = len(all_leaves)
+        total_pages = math.ceil(total_leaves / per_page)
+        start_index = (page - 1) * per_page
+        end_index = start_index + per_page
+        paginated_leaves = all_leaves[start_index:end_index]
+
+        # Format dates
+        for leave in paginated_leaves:
+            leave["appliedOn"] = leave["appliedOnRaw"].strftime('%Y-%m-%d') if leave["appliedOnRaw"] else None
+            del leave["appliedOnRaw"]
 
         return jsonify({
             "status": "success",
-            "message": "Leave data fetched successfully",
-            "page": page,
-            "limit": limit,
-            "totalUsers": total_users,
-            "data": results
-        })
+            "message": "Leaves fetched successfully",
+            "pagination": {
+                "current_page": page,
+                "per_page": per_page,
+                "total_leaves": total_leaves,
+                "total_pages": total_pages,
+                "has_next": page < total_pages,
+                "has_prev": page > 1,
+                "next_page": page + 1 if page < total_pages else None,
+                "prev_page": page - 1 if page > 1 else None
+            },
+            "filters_applied": {
+                "status": status_filter or None,
+                "department": department_filter or None
+            },
+            "data": paginated_leaves
+        }), 200
 
     except Exception as e:
         db.session.rollback()
@@ -1028,15 +1077,83 @@ def user_leaves():
         }), 500
 
 
+@superAdminBP.route('/userleave/<int:leave_id>', methods=['PUT'])
+def update_user_leave_status(leave_id):
+    try:
+        userID = g.user.get('userID') if g.user else None
+        if not userID:
+            return jsonify({
+                "status": "error",
+                "message": "No user ID or auth token provided"
+            }), 404
+
+        superadmin = SuperAdmin.query.filter_by(id=userID).first()
+
+        if not superadmin:
+            user = User.query.filter_by(id=userID).first()
+            if not user or user.userRole.lower() != 'hr':
+                return jsonify({
+                    "status": "error",
+                    "message": "You are not allowed to manage this."
+                }), 403
+
+        data = request.get_json()
+        new_status = data.get('status')
+
+        if not new_status or new_status.lower() not in ['pending', 'approved', 'rejected']:
+            return jsonify({
+                "status": "error",
+                "message": "Invalid or missing status. Use: pending, approved, rejected."
+            }), 400
+
+        leave = UserLeave.query.get(leave_id)
+
+        if not leave:
+            return jsonify({
+                "status": "error",
+                "message": "Leave request not found"
+            }), 404
+
+        print(f"Old status: {leave.status}")
+        
+        # Update the status
+        leave.status = new_status.lower()  # Ensure consistent case
+        
+        db.session.commit()
+        db.session.refresh(leave)
+        
+        print(f"New status: {leave.status}, {leave.id}")
+
+        return jsonify({
+            "status": "success",
+            "message": f"Leave status updated to '{leave.status}'",
+            "leaveId": leave.id,
+            "empId": leave.empId,
+            "newStatus": leave.status
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e)
+        }), 500
+
+
+# ====================================
+#         ADMIN LEAVE SECTION         
+# ====================================
+
+
 @superAdminBP.route('/adminleave', methods=['POST'])
 def addLeave():
-    print('Request hit')
     data = request.form
 
     if not data:
         return jsonify({"status": "error", "message": "No data provided"}), 400
 
-    required_fields = ['leaveStatus', 'leaveType', 'calculationType', 'probation', 'day_type', 'carryforward', 'encashment', 'lapse_policy','max_leave_once', 'max_leave_year', 'monthly_leave_limit']
+    required_fields = ['leaveName', 'leaveType', 'calculationType', 'probation', 'day_type', 'carryforward', 'encashment', 'lapse_policy','max_leave_once', 'max_leave_year', 'monthly_leave_limit']
     if not all(field in data for field in required_fields):
         return jsonify({"status": "error", "message": "Please enter all required fields"}), 400
 
@@ -1072,7 +1189,7 @@ def addLeave():
 
         newLeave = AdminLeave(
             superadminPanel=superadminpanelID,
-            leaveStatus=data['leaveStatus'],
+            leaveName=data['leaveName'],
             leaveType=data['leaveType'],
             calculationType=data['calculationType'],
             probation=str_to_bool(data.get('probation')),
@@ -1177,22 +1294,24 @@ def get_leaveDetails():
 
             panel = superadminRef.superadminPanel
 
-        leave = panel.adminLeave
-        if not leave:
-            return jsonify({"status": "error", "message": "No leave details found"}), 404
-
-        leavelist = {
-            "id": leave.id,
-            "leaveType": leave.leaveType,
-            "leaveStatus": leave.leaveStatus,
-            "calculationType": leave.calculationType,
-            "probation": leave.probation,
-            "day_type": leave.day_type,
-            "carryforward": leave.carryforward,
-            "encashment": leave.encashment,
-            "max_leave_once" : leave.max_leave_once,
-            "max_leave_year" : leave.max_leave_year,
-        }
+        leavedetails = panel.adminLeave
+        if not leavedetails:
+            return jsonify({"status": "error", "message": "No leave details found"}), 200
+        
+        leavelist=[]
+        for leave in leavedetails:
+                leavelist.append({
+                    "id": leave.id,
+                    "leaveType": leave.leaveType,
+                    "leaveName": leave.leaveName,
+                    "calculationType": leave.calculationType,
+                    "probation": leave.probation,
+                    "day_type": leave.day_type,
+                    "carryforward": leave.carryforward,
+                    "encashment": leave.encashment,
+                    "max_leave_once" : leave.max_leave_once,
+                    "max_leave_year" : leave.max_leave_year,
+                })
 
         return jsonify({
             "status": "success",
@@ -1514,7 +1633,7 @@ def add_bonus():
             "message" : "No data provided"
         }), 400
     
-    required_feilds = ['bonus_name','bonus_description','bonus_methods','amount' ]
+    required_feilds = ['bonus_name','bonus_description','bonus_methods','amount','employeement_type']
     if not all(feild in data for feild in required_feilds):
         return jsonify({
             'status' : "error",
@@ -1562,6 +1681,8 @@ def add_bonus():
             bonus_description = data['bonus_description'],
             bonus_methods = data['bonus_methods'],
             amount = int(data['amount']),
+            employeement_type = data['employeement_type'],
+            # department_type = data['department_type'] if data['department_type'] else 'lawaris'
         )
 
         db.session.add(bonusPolicy)

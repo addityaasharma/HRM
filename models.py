@@ -33,10 +33,10 @@ class SuperAdminPanel(db.Model):
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     superadmin_id = db.Column(db.Integer, db.ForeignKey('superadmin.id'), nullable=False)
     allUsers = db.relationship('User', backref='superadminpanel', lazy=True)
-    adminLeave = db.relationship('AdminLeave', backref='superadminpanel', lazy=True, uselist=False)
+    adminLeave = db.relationship('AdminLeave', backref='superadminpanel', lazy=True)
     adminDocs = db.relationship('AdminDoc', backref='superadminpanel', lazy=True)
     adminAnnouncement = db.relationship('Announcement', backref='superadminpanel', lazy=True)
-    adminBonusPolicy = db.relationship('BonusPolicy', backref='superadminpanel', uselist=False)
+    adminBonusPolicy = db.relationship('BonusPolicy', backref='superadminpanel', lazy=True)
 
 class Announcement(db.Model):
     __tablename__ = 'announcement'
@@ -80,7 +80,7 @@ class AdminLeave(db.Model):
     __tablename__ = 'adminleave'
     id = db.Column(db.Integer, primary_key=True)
     superadminPanel = db.Column(db.Integer, db.ForeignKey('superadminpanel.id'), nullable=False)
-    leaveStatus = db.Column(db.Enum('paid', 'unpaid', name='leave_status_enum'), default='unpaid', nullable=False)
+    leaveName = db.Column(db.String(120), nullable=False)
     leaveType = db.Column(db.Enum('casual', 'sick', name='leave_type_enum'), default='casual', nullable=False)
 
     #rules for leave
@@ -114,17 +114,22 @@ class BonusPolicy(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     superPanelID = db.Column(db.Integer, db.ForeignKey('superadminpanel.id'), nullable=False)
     bonus_name = db.Column(db.String(120),nullable=False)
-    bonus_description = db.Column(db.String(255), nullable=False)
-    bonus_description = db.Column(
+    bonus_method = db.Column(
         ENUM('fixed', 'percentage', name='bonus_methods_enum'),
         default='fixed',
         nullable=False
     )
     amount = db.Column(db.Integer, nullable=False)
-
+    apply = db.Column(
+        ENUM('employeementType', 'department', name='apply_method_enum'),
+        default='employeementType',
+        nullable=False
+    )
+    employeement_type = db.Column(db.String(120))
+    department_type = db.Column(db.String(120))
 
 # ====================================
-#          USER SECTION
+#           USER SECTION              
 # ====================================
 
 class User(db.Model):
@@ -238,6 +243,7 @@ class UserLeave(db.Model):                                           #user leave
     days = db.Column(db.Integer)
     status = db.Column(db.String(100))
     unpaidDays = db.Column(db.Integer)
+    createdAt = db.Column(db.DateTime, default=datetime.utcnow)
 
 class UserTicket(db.Model):
     __tablename__ = 'userticket'
