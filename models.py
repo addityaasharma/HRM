@@ -1,5 +1,7 @@
 from datetime import datetime, time
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy.dialects.mysql import ENUM
+
 
 db = SQLAlchemy()
 
@@ -10,6 +12,11 @@ class Master(db.Model):
     company_email = db.Column(db.String(120), nullable=False)
     # admins = db.relationship('SuperAdmin', backref='master', lazy=True)
 
+
+# ====================================
+#            SUPERADMIN SECTION
+# ====================================
+
 class SuperAdmin(db.Model):
     __tablename__ = 'superadmin'
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
@@ -19,15 +26,48 @@ class SuperAdmin(db.Model):
     company_password = db.Column(db.String(250), nullable=False)
     is_super_admin = db.Column(db.Boolean, default=False)
     # master_id = db.Column(db.Integer, db.ForeignKey('master.id'), nullable=True)
-    superadminPanel = db.relationship('SuperAdminPanel', backref='superadmin', uselist=False, lazy=True)
+    superadminPanel = db.relationship('SuperAdminPanel', backref='superadmin', uselist=False, lazy=True)  #superadmin panel
 
 class SuperAdminPanel(db.Model):
     __tablename__ = 'superadminpanel'
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     superadmin_id = db.Column(db.Integer, db.ForeignKey('superadmin.id'), nullable=False)
     allUsers = db.relationship('User', backref='superadminpanel', lazy=True)
-    adminLeave = db.relationship('AdminLeave', backref='superadminpanel', lazy=True)
+    adminLeave = db.relationship('AdminLeave', backref='superadminpanel', lazy=True, uselist=False)
     adminDocs = db.relationship('AdminDoc', backref='superadminpanel', lazy=True)
+    adminAnnouncement = db.relationship('Announcement', backref='superadminpanel', lazy=True)
+    adminBonusPolicy = db.relationship('BonusPolicy', backref='superadminpanel', uselist=False)
+
+class Announcement(db.Model):
+    __tablename__ = 'announcement'
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    adminPanelId = db.Column(db.Integer, db.ForeignKey('superadminpanel.id'),nullable=False)
+    content = db.Column(db.Text)
+    imageURL = db.Column(db.String(300))
+    videoURL = db.Column(db.String(300))
+    pollQuestion = db.Column(db.String(200))
+    scheduleTime = db.Column(db.DateTime, nullable=True)
+    published = db.Column(db.Boolean, default=False)
+    createdAt = db.Column(db.DateTime, default=datetime.utcnow)
+    polloptions = db.relationship('PollOption', backref='announcement', lazy=True)
+
+class PollOption(db.Model):
+    __tablename__ = 'polloption'
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    announcementID = db.Column(db.Integer, db.ForeignKey('announcement.id'), nullable=False)
+    optionText = db.Column(db.String(120), nullable=False)
+    voteCount = db.Column(db.Integer, default=0)
+    votes = db.relationship('PollVote', backref='polloption', lazy=True)
+
+class PollVote(db.Model):
+    __tablename__ = 'pollvote'
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    userID = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    optionID = db.Column(db.Integer, db.ForeignKey('polloption.id'), nullable=False)
+    createdAt = db.Column(db.DateTime, default=datetime.utcnow)
+    __table_args__ = (
+        db.UniqueConstraint('userID', 'optionID', name='unique_user_option_vote'),
+    )
 
 class AdminDoc(db.Model):
     __tablename__ = 'admindocuments'
@@ -37,21 +77,62 @@ class AdminDoc(db.Model):
     title = db.Column(db.String(255))
 
 class AdminLeave(db.Model):
-    __tablename__= 'adminleave'
-    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    __tablename__ = 'adminleave'
+    id = db.Column(db.Integer, primary_key=True)
     superadminPanel = db.Column(db.Integer, db.ForeignKey('superadminpanel.id'), nullable=False)
-    leaveType = db.Column(db.String(120))
-    Quota = db.Column(db.Integer)
-    LeaveStatus = db.Column(db.String(120))
-    carryForward = db.Column(db.Boolean, default=True)
-    active = db.Column(db.Boolean, default=True)
+    leaveStatus = db.Column(db.Enum('paid', 'unpaid', name='leave_status_enum'), default='unpaid', nullable=False)
+    leaveType = db.Column(db.Enum('casual', 'sick', name='leave_type_enum'), default='casual', nullable=False)
+
+    #rules for leave
+    probation = db.Column(db.Boolean, default=True)
+    lapse_policy = db.Column(db.Boolean, default=False)
+    calculationType = db.Column(db.Enum('monthly', 'quarterly', 'annually', name='leave_calculation_type'), default='annually', nullable=False)
+    day_type = db.Column(db.Enum('fullday', 'halfday', name='day_type_enum'), default='fullday', nullable=False)
+    encashment = db.Column(db.Boolean, default=False)
+    carryforward = db.Column(db.Boolean, default=False)
+    max_leave_once = db.Column(db.Integer)
+    max_leave_year = db.Column(db.Integer)
+    monthly_leave_limit = db.Column(db.Integer)
+
+# class RemoteWorkPolicy(db.Model):
+#     __tablename__ = 'remotepolicy'
+#     id = db.Column(db.Integer, primary_key=True)
+#     superPanelId  = db.Column(db.Integer, db.ForeignKey('superadminpanel.id'), nullable=False)
+#     remote_work_type = db.Column(db.String(120), nullable=False)
+#     max_remote_day  = db.Column(db.Integer, nullable=False)
+#     homeWorkAllow = db.Column(db.Boolean, default=False)
+#     approvalRequired = db.Column(db.Boolean, default=True)
+#     allowedDepartments = db.Column(db.String(120),nullable=False)
+#     shiftName = db.Column(db.String(120),nullable=False)
+#     attendance_method = db.Column(db.String(120))
+#     vpn_access = db.Column(db.Boolean, default=False)
+#     equipment_provided= db.Column(db.Boolean)
+
+
+class BonusPolicy(db.Model):
+    __tablename__ = 'bonuspolicy'
+    id = db.Column(db.Integer, primary_key=True)
+    superPanelID = db.Column(db.Integer, db.ForeignKey('superadminpanel.id'), nullable=False)
+    bonus_name = db.Column(db.String(120),nullable=False)
+    bonus_description = db.Column(db.String(255), nullable=False)
+    bonus_description = db.Column(
+        ENUM('fixed', 'percentage', name='bonus_methods_enum'),
+        default='fixed',
+        nullable=False
+    )
+    amount = db.Column(db.Integer, nullable=False)
+
+
+# ====================================
+#          USER SECTION
+# ====================================
 
 class User(db.Model):
     __tablename__ = 'user'
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     
     # Personal Information
-    superadminId = db.Column(db.String(120), nullable=False)
+    superadminId = db.Column(db.String(120), nullable=False)    # admins super id
     profileImage = db.Column(db.String(200))
     userName = db.Column(db.String(100), nullable=False)
     empId = db.Column(db.String(20), unique=True, nullable=False)
@@ -117,25 +198,6 @@ class UserPanelData(db.Model):
     UserSalary = db.relationship('UserSalaryDetails', backref='user_panel', lazy=True)
     UserMessage = db.relationship('UserChat', backref='user_panel', lazy=True)
 
-class Anouncement(db.Model):
-    __tablename__ = 'announcement'
-    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    userId = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    content = db.Column(db.Text)
-    imageURL = db.Column(db.String(300))
-    videoURL = db.Column(db.String(300))
-    pollQuestion = db.Column(db.String(200))
-    scheduleTime = db.Column(db.DateTime, default=datetime.utcnow)
-    createdAt = db.Column(db.DateTime, default=datetime.utcnow)
-    polloptions = db.relationship('PollOption', backref='announcement', lazy=True)
-
-class PollOption(db.Model):
-    __tablename__ = 'polloption'
-    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    announcementID = db.Column(db.Integer, db.ForeignKey('announcement.id'), nullable=False)
-    optionText = db.Column(db.String(120), nullable=False)
-    voteCount = db.Column(db.Integer, default=0)
-
 class UserChat(db.Model):
     __tablename__ = 'messages'
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
@@ -160,21 +222,22 @@ class UserSalaryDetails(db.Model):
     payslip = db.Column(db.String(12))
     approvedLeaves = db.Column(db.String(12))
 
-class UserLeave(db.Model):
+class UserLeave(db.Model):                                           #user leave
     __tablename__ = 'userleave'
     id = db.Column(db.Integer, primary_key=True)
     panelData = db.Column(db.Integer, db.ForeignKey('userpaneldata.id'),nullable=False)
-    name = db.Column(db.String(200))
-    email = db.Column(db.String(200))
     empId = db.Column(db.String(200))
     leavetype = db.Column(db.String(120))
     leavefrom = db.Column(db.DateTime)
     leaveto = db.Column(db.DateTime)
-    day = db.Column(db.String(200))
-    month = db.Column(db.Integer)
     reason = db.Column(db.String(200))
-    attachment = db.Column(db.String(200))
+
+    #additional data
+    name = db.Column(db.String(200))
+    email = db.Column(db.String(200))
+    days = db.Column(db.Integer)
     status = db.Column(db.String(100))
+    unpaidDays = db.Column(db.Integer)
 
 class UserTicket(db.Model):
     __tablename__ = 'userticket'
@@ -283,13 +346,3 @@ class UserHoliday(db.Model):
     shift = db.Column(db.String(200))
     type = db.Column(db.String(200))
     description = db.Column(db.String(200))
-
-class UserLeaveQuota(db.Model):
-    __tablename__ = 'userleavequota'
-    id = db.Column(db.Integer, primary_key=True)
-    leaveType = db.Column(db.String(50))
-    definedYearlyLeave = db.Column(db.Integer)
-    definedMonthlyLeave = db.Column(db.Integer)  #2
-    monthOfLeave = db.Column(db.Integer) #06
-    user_leave_taken = db.Column(db.Integer) #00
-    remaining_leave = db.Column(db.Integer) #02
