@@ -665,6 +665,7 @@ def edit_user(userId):
             "error": str(e)
         }), 500
 
+
 @superAdminBP.route('/all-users', methods=['POST'])
 def employeeCreation():
     data = request.form
@@ -1014,6 +1015,7 @@ def user_leaves():
                 all_leaves.append({
                     "userId": user.id,
                     "userName": user.userName,
+                    "department" : user.department,
                     "leaveId" : leave.id,
                     "empId": leave.empId,
                     "department": user.department,
@@ -1033,17 +1035,14 @@ def user_leaves():
                 "message": "No leave records found"
             }), 404
 
-        # Sort by applied date descending
         all_leaves.sort(key=lambda x: x["appliedOnRaw"] or datetime.min, reverse=True)
 
-        # Total and pagination logic
         total_leaves = len(all_leaves)
         total_pages = math.ceil(total_leaves / per_page)
         start_index = (page - 1) * per_page
         end_index = start_index + per_page
         paginated_leaves = all_leaves[start_index:end_index]
 
-        # Format dates
         for leave in paginated_leaves:
             leave["appliedOn"] = leave["appliedOnRaw"].strftime('%Y-%m-%d') if leave["appliedOnRaw"] else None
             del leave["appliedOnRaw"]
@@ -1052,14 +1051,9 @@ def user_leaves():
             "status": "success",
             "message": "Leaves fetched successfully",
             "pagination": {
-                "current_page": page,
                 "per_page": per_page,
                 "total_leaves": total_leaves,
                 "total_pages": total_pages,
-                "has_next": page < total_pages,
-                "has_prev": page > 1,
-                "next_page": page + 1 if page < total_pages else None,
-                "prev_page": page - 1 if page > 1 else None
             },
             "filters_applied": {
                 "status": status_filter or None,
@@ -1629,76 +1623,73 @@ def add_bonus():
     data = request.get_json()
     if not data:
         return jsonify({
-            "status" : "error",
-            "message" : "No data provided"
+            "status": "error",
+            "message": "No data provided"
         }), 400
-    
-    required_feilds = ['bonus_name','bonus_description','bonus_methods','amount','employeement_type']
-    if not all(feild in data for feild in required_feilds):
+
+    required_fields = ['bonus_name', 'bonus_method', 'amount']
+    if not all(field in data for field in required_fields):
         return jsonify({
-            'status' : "error",
-            "message" : "All feilds are required"
-        }), 404
-    
+            'status': "error",
+            "message": "All required fields (bonus_name, bonus_method, amount) must be provided"
+        }), 400
+
     try:
         userID = g.user.get('userID') if g.user else None
         if not userID:
-            return jsonify({"status" : "error", "message" : "No user or auth token provided"}), 404
-        
+            return jsonify({"status": "error", "message": "No user or auth token provided"}), 403
 
         superpanelid = None
         superadmin = SuperAdmin.query.filter_by(id=userID).first()
 
         if superadmin:
-                superpanelid = superadmin.superadminPanel.id
-    
+            superpanelid = superadmin.superadminPanel.id
         else:
             user = User.query.filter_by(id=userID).first()
-            if not user or user.userRole.lower() != 'hr':    
+            if not user or user.userRole.lower() != 'hr':
                 return jsonify({
                     "status": "error",
                     "message": "Unauthorized"
-                }), 404
-            
+                }), 403
+
             userSuperAdmin = SuperAdmin.query.filter_by(superId=user.superadminId).first()
-            if not userSuperAdmin:
+            if not userSuperAdmin or not userSuperAdmin.superadminPanel:
                 return jsonify({
                     "status": "error",
-                    "message": "Unauthorized"
+                    "message": "Superadmin panel not found"
                 }), 404
-            if len(userSuperAdmin.superadminPanel.adminBonusPolicy) > 0:
+
+            if userSuperAdmin.superadminPanel.adminBonusPolicy:
                 return jsonify({
-                    "status" : "error",
-                    "message" : "Policy already exist, update or delete it."
-                }),400
+                    "status": "error",
+                    "message": "Policy already exists. Update or delete it."
+                }), 400
 
             superpanelid = userSuperAdmin.superadminPanel.id
-        
 
-        bonusPolicy =  BonusPolicy(
-            superPanelID = superpanelid,
-            bonus_name = data['bonus_name'],
-            bonus_description = data['bonus_description'],
-            bonus_methods = data['bonus_methods'],
-            amount = int(data['amount']),
-            employeement_type = data['employeement_type'],
-            # department_type = data['department_type'] if data['department_type'] else 'lawaris'
+        bonus_policy = BonusPolicy(
+            superPanelID=superpanelid,
+            bonus_name=data['bonus_name'],
+            bonus_method=data['bonus_method'],
+            amount=int(data['amount']),
+            employeement_type=data.get('employeement_type') or None,
+            department_type=data.get('department_type') or None
         )
 
-        db.session.add(bonusPolicy)
+        db.session.add(bonus_policy)
         db.session.commit()
 
         return jsonify({
-            "status" : "success",
-            "message" : "Added successfully"
+            "status": "success",
+            "message": "Bonus policy added successfully"
         }), 200
-        
+
     except Exception as e:
         db.session.rollback()
         return jsonify({
-            "status" : "error",
-            "message" : "Internal Server Error",
-            "error" : str(e)
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e)
         }), 500
     
 
@@ -1725,7 +1716,16 @@ def get_bonus():
                     return jsonify({"status": "error", "message": "Unauthorized"}), 403
 
         bonus_policy  = userSuperAdmin.superadminPanel.adminBonusPolicy
+        bonus_list = []
 
+        for bonus in bonus_policy:
+            bonus_list.append({
+                "amount" : bonus.amount,
+                "bonus_method" : bonus.bonus_method,
+                "bonus_name" : bonus.bonus_name,
+                "employeement_type" : bonus.employeement_type,
+                "department_type" : bonus.department_type,
+            })
         if not bonus_policy:
             return jsonify({
                 "status": "error",
@@ -1734,13 +1734,7 @@ def get_bonus():
 
         return jsonify({
             "status": "success",
-            "bonus_policy": {
-                "id": bonus_policy.id,
-                "bonus_name": bonus_policy.bonus_name,
-                "bonus_description": bonus_policy.bonus_description,
-                "bonus_methods": bonus_policy.bonus_methods,
-                "amount": bonus_policy.amount
-            }
+            "data": bonus_list,
         }), 200
 
     except Exception as e:
