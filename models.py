@@ -12,7 +12,6 @@ class Master(db.Model):
     company_email = db.Column(db.String(120), nullable=False)
     # admins = db.relationship('SuperAdmin', backref='master', lazy=True)
 
-
 # ====================================
 #            SUPERADMIN SECTION
 # ====================================
@@ -37,6 +36,7 @@ class SuperAdminPanel(db.Model):
     adminDocs = db.relationship('AdminDoc', backref='superadminpanel', lazy=True)
     adminAnnouncement = db.relationship('Announcement', backref='superadminpanel', lazy=True)
     adminBonusPolicy = db.relationship('BonusPolicy', backref='superadminpanel', lazy=True)
+    adminTimePolicy = db.relationship('ShiftTimeManagement', backref='superadminpanel', lazy=True)
 
 class Announcement(db.Model):
     __tablename__ = 'announcement'
@@ -94,19 +94,32 @@ class AdminLeave(db.Model):
     max_leave_year = db.Column(db.Integer)
     monthly_leave_limit = db.Column(db.Integer)
 
-# class RemoteWorkPolicy(db.Model):
-#     __tablename__ = 'remotepolicy'
-#     id = db.Column(db.Integer, primary_key=True)
-#     superPanelId  = db.Column(db.Integer, db.ForeignKey('superadminpanel.id'), nullable=False)
-#     remote_work_type = db.Column(db.String(120), nullable=False)
-#     max_remote_day  = db.Column(db.Integer, nullable=False)
-#     homeWorkAllow = db.Column(db.Boolean, default=False)
-#     approvalRequired = db.Column(db.Boolean, default=True)
-#     allowedDepartments = db.Column(db.String(120),nullable=False)
-#     shiftName = db.Column(db.String(120),nullable=False)
-#     attendance_method = db.Column(db.String(120))
-#     vpn_access = db.Column(db.Boolean, default=False)
-#     equipment_provided= db.Column(db.Boolean)
+class ShiftTimeManagement(db.Model):
+    __tablename__ = 'shiftAndTimeManagement'
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    shiftName = db.Column(db.String(120), nullable=False)
+    shiftType = db.Column(
+        ENUM('dayshift', 'nightshift', name='work_shift_type'),
+        default='dayshift', nullable=False
+    )
+    shiftStatus = db.Column(
+        ENUM('enable', 'disable', name='shift_status_name'),
+        default='disable'
+    )
+    shiftStart = db.Column(db.DateTime, nullable=False)
+    shiftEnd = db.Column(db.DateTime, nullable=False)
+    GraceTime = db.Column(db.DateTime, nullable=False)
+    MaxEarly = db.Column(db.DateTime, nullable=False)
+    MaxLateEntry = db.Column(db.DateTime, nullable=False)
+    HalfDayThreshhold = db.Column(db.DateTime, nullable=False)
+    OverTimeCountAfter = db.Column(db.DateTime, nullable=False)
+    Biometric = db.Column(db.Boolean, default=False)
+    RemoteCheckIn = db.Column(db.Boolean, default=False)
+    AutoLogout = db.Column(db.Boolean, default=True)
+    ShiftSwap = db.Column(db.Boolean, default=False)
+
+    #relation
+    superpanel = db.Column(db.Integer, db.ForeignKey('superadminpanel.id'), nullable=False)
 
 
 class BonusPolicy(db.Model):
@@ -144,6 +157,10 @@ class User(db.Model):
     email = db.Column(db.String(120), unique=True, nullable=False)
     password = db.Column(db.String(512), nullable=False)
     gender = db.Column(db.String(120))
+    shift = db.Column(
+        ENUM('dayshift', 'nightshift', name='user_shift'),
+        default='dayshift'
+    )
     
     # Contact Information
     number = db.Column(db.String(20))
@@ -353,3 +370,4 @@ class UserHoliday(db.Model):
     shift = db.Column(db.String(200))
     type = db.Column(db.String(200))
     description = db.Column(db.String(200))
+

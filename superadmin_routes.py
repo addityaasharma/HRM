@@ -1,4 +1,4 @@
-from models import SuperAdmin, SuperAdminPanel, db, PunchData, User, UserTicket, AdminLeave, AdminDoc, Announcement, PollOption, AdminLeave, BonusPolicy, UserLeave, UserPanelData
+from models import SuperAdmin, SuperAdminPanel, db, PunchData, User, UserTicket, AdminLeave, AdminDoc, Announcement, PollOption, AdminLeave, BonusPolicy, UserLeave, UserPanelData, ShiftTimeManagement
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask import Blueprint, request, jsonify, g
 from middleware import create_tokens
@@ -245,8 +245,7 @@ def get_myDetails():
 #            PUNCH SECTION            
 # ====================================
 
-
-@superAdminBP.route('/all-punchdetails', methods=['GET'])
+@superAdminBP.route('/punchdetails', methods=['GET'])
 def all_punchDetails():
     try:
         userId = g.user.get('userID') if g.user else None
@@ -257,95 +256,79 @@ def all_punchDetails():
             }), 400
 
         superadmin = SuperAdmin.query.filter_by(id=userId).first()
-        if not superadmin or not superadmin.superadminPanel:
+        if not superadmin:
             return jsonify({
-                'status': 'error',
-                'message': 'SuperAdmin or their panel not found.'
+                "status": "error",
+                "message": "No superadmin found",
             }), 404
 
-        if not superadmin.is_super_admin:
-            user = User.query.filter_by(id=userId).first()
-            if not user or user.userRole.lower() != 'hr':
-                return jsonify({
-                    'status': 'error',
-                    'message': 'You are not allowed to access this route'
-                }), 403
-
-        users = User.query.filter_by(superadmin_panel_id=superadmin.superadminPanel.id).all()
-        if not users:
+        alluser = superadmin.superadminPanel.allUsers
+        if not alluser:
             return jsonify({
-                'status': 'error',
-                'message': 'No users found under this SuperAdminPanel.'
+                "status": "error",
+                "message": "No users found under this panel",
             }), 404
 
-        panel_ids = [user.panelData.id for user in users if user.panelData]
-        if not panel_ids:
-            return jsonify({
-                'status': 'error',
-                'message': 'No panel data found for users under this SuperAdmin.'
-            }), 404
+        # Get filters and pagination from query params
+        status_filter = request.args.get('status')
+        department_filter = request.args.get('department')
+        search_query = request.args.get('search', '').lower()
+        page = int(request.args.get('page', 1))
+        per_page = int(request.args.get('per_page', 10))
 
-        query = PunchData.query.filter(PunchData.panelData.in_(panel_ids))
+        punchlist = []
 
-        # === Optional Date Filter ===
-        date_str = request.args.get('date')
-        if date_str:
-            try:
-                date_filter = datetime.strptime(date_str, "%Y-%m-%d").date()
-                query = query.filter(db.func.date(PunchData.login) == date_filter)
-            except ValueError:
-                return jsonify({
-                    'status': 'error',
-                    'message': 'Invalid date format. Use YYYY-MM-DD.'
-                }), 400
+        for user in alluser:
+            panel_data = user.panelData
+            if not panel_data:
+                continue
 
-        department = request.args.get('department')
-        if department:
-            user_ids_in_dept = [user.panelData.id for user in users if user.department and user.department.lower() == department.lower()]
-            query = query.filter(PunchData.user_panel_id.in_(user_ids_in_dept))
+            if department_filter and user.department.lower() != department_filter.lower():
+                continue
 
-        status = request.args.get('status')
-        if status:
-            query = query.filter(PunchData.status.ilike(f"%{status}%"))
+            if search_query:
+                if not (
+                    search_query in (user.userName or "").lower() or
+                    search_query in (user.email or "").lower() or
+                    search_query in (user.empId or "").lower()
+                ):
+                    continue
 
-        search = request.args.get('query')
-        if search:
-            query = query.filter(
-                db.or_(
-                    PunchData.name.ilike(f'%{search}%'),
-                    PunchData.email.ilike(f'%{search}%'),
-                    PunchData.empId.ilike(f'%{search}%')
-                )
-            )
+            for punch in panel_data.userPunchData:
+                if status_filter and punch.status.lower() != status_filter.lower():
+                    continue
 
-        # === Pagination ===
-        page = request.args.get('page', default=1, type=int)
-        limit = request.args.get('limit', default=10, type=int)
-        paginated_data = query.order_by(PunchData.login.desc()).paginate(page=page, per_page=limit, error_out=False)
+                punchlist.append({
+                    "punch_id": punch.id,
+                    "empId": punch.empId,
+                    "name": punch.name,
+                    "email": punch.email,
+                    "login": punch.login.isoformat() if punch.login else None,
+                    "logout": punch.logout.isoformat() if punch.logout else None,
+                    "location": punch.location,
+                    "image": punch.image,
+                    "status": punch.status,
+                    "totalhour": str(punch.totalhour) if punch.totalhour else None,
+                    "productivehour": punch.productivehour.isoformat() if punch.productivehour else None,
+                    "shift": punch.shift.isoformat() if punch.shift else None
+                })
 
-        # === Serialize ===
-        punch_list = []
-        for punch in paginated_data.items:
-            punch_list.append({
-                'id': punch.id,
-                'image': punch.image,
-                'empId': punch.empId,
-                'name': punch.name,
-                'email': punch.email,
-                'login': punch.login.isoformat() if punch.login else None,
-                'logout': punch.logout.isoformat() if punch.logout else None,
-                'location': punch.location,
-                'status': punch.status
-            })
+        # Apply pagination
+        total = len(punchlist)
+        start = (page - 1) * per_page
+        end = start + per_page
+        paginated_data = punchlist[start:end]
 
         return jsonify({
             'status': 'success',
             'message': 'Punch data fetched successfully.',
-            'page': page,
-            'limit': limit,
-            'total': paginated_data.total,
-            'total_pages': paginated_data.pages,
-            'data': punch_list
+            'data': paginated_data,
+            'meta': {
+                'total': total,
+                'page': page,
+                'per_page': per_page,
+                'pages': (total + per_page - 1) // per_page
+            }
         }), 200
 
     except Exception as e:
@@ -357,7 +340,7 @@ def all_punchDetails():
         }), 500
 
 
-@superAdminBP.route('/all-punchdetails/<int:punchId>',methods=['PUT'])
+@superAdminBP.route('/punchdetails/<int:punchId>',methods=['PUT'])
 def editPunchDetails(punchId):
     data=request.get_json()
 
@@ -366,7 +349,7 @@ def editPunchDetails(punchId):
         return jsonify({
             "status"  : "error",
             "message" : "Status is required"
-        })
+        }), 404
     
     try:
         userID = g.user.get('userID') if g.user else None
@@ -409,7 +392,7 @@ def editPunchDetails(punchId):
         }),500
 
 
-# ====================================
+# ==================================== 
 #         ALL EMPLOYEE SECTION        
 # ====================================
 
@@ -667,7 +650,7 @@ def edit_user(userId):
         }), 500
 
 
-@superAdminBP.route('/all-users', methods=['POST'])
+@superAdminBP.route('/all-users', methods=['POST'])          
 def employeeCreation():
     data = request.form
 
@@ -1797,9 +1780,9 @@ def edit_bonus(id):
         if 'amount' in data:
             bonuspolicy.amount = int(data['amount'])
         if 'employeement_type' in data:
-            bonuspolicy.employeement_type = int(data['employeement_type'])
+            bonuspolicy.employeement_type = data['employeement_type']
         if 'department_type' in data:
-            bonuspolicy.department_type = int(data['department_type'])
+            bonuspolicy.department_type = data['department_type']
 
         db.session.commit()
 
@@ -1874,17 +1857,19 @@ def delete_bonus(id):
 
 
 # ====================================
-#      CODE OF CONDUCT SECTION               
+#      SHIFT AND TIME SECTION               
 # ====================================
 
-@superAdminBP.route('/coc')
-def add_codeOfConduct():
+from datetime import datetime  # Ensure this is imported
+
+@superAdminBP.route('/shift_time', methods=['POST'])
+def addshift():
     try:
         userID = g.user.get('userID') if g.user else None
         if not userID:
             return jsonify({
-                "status" : "error",
-                "message" : "No user id or auth token found"
+                "status": "error",
+                "message": "No user ID or auth token found"
             }), 404
 
         superadmin = SuperAdmin.query.filter_by(id=userID).first()
@@ -1892,14 +1877,60 @@ def add_codeOfConduct():
             user = User.query.filter_by(id=userID).first()
             if not user or user.userRole.lower() != 'hr':
                 return jsonify({
-                    "status" : "error",
-                    "message" : "Unauthorized"
-                }), 404
-        
+                    "status": "error",
+                    "message": "Unauthorized"
+                }), 403
+            superadmin = SuperAdmin.query.filter_by(superId=user.superadminId).first()
+            if not superadmin:
+                return jsonify({
+                    "status": "error",
+                    "message": "Associated superadmin not found"
+                }), 403
+
+        data = request.get_json()
+        required_fields = [
+            'shiftName', 'shiftType', 'shiftStatus', 'shiftStart', 'shiftEnd',
+            'GraceTime', 'MaxEarly', 'MaxLateEntry', 'HalfDayThreshhold',
+            'OverTimeCountAfter'
+        ]
+
+        if not data or not all(field in data for field in required_fields):
+            return jsonify({
+                "status": "error",
+                "message": f"Missing fields. Required: {required_fields}"
+            }), 400
+
+        shift = ShiftTimeManagement(
+            shiftName=data['shiftName'],
+            shiftType=data['shiftType'],
+            shiftStatus=data['shiftStatus'],
+            shiftStart=datetime.strptime(data['shiftStart'], '%Y-%m-%d %H:%M:%S'),
+            shiftEnd=datetime.strptime(data['shiftEnd'], '%Y-%m-%d %H:%M:%S'),
+            GraceTime=datetime.strptime(data['GraceTime'], '%Y-%m-%d %H:%M:%S'),
+            MaxEarly=datetime.strptime(data['MaxEarly'], '%Y-%m-%d %H:%M:%S'),
+            MaxLateEntry=datetime.strptime(data['MaxLateEntry'], '%Y-%m-%d %H:%M:%S'),
+            HalfDayThreshhold=datetime.strptime(data['HalfDayThreshhold'], '%Y-%m-%d %H:%M:%S'),
+            OverTimeCountAfter=datetime.strptime(data['OverTimeCountAfter'], '%Y-%m-%d %H:%M:%S'),
+            Biometric=data.get('Biometric', False),
+            RemoteCheckIn=data.get('RemoteCheckIn', False),
+            AutoLogout=data.get('AutoLogout', True),
+            ShiftSwap=data.get('ShiftSwap', False),
+            superpanel=superadmin.superadminPanel.id 
+        )
+
+        db.session.add(shift)
+        db.session.commit()
+
+        return jsonify({
+            "status": "success",
+            "message": "Shift added successfully",
+            "shift_id": shift.id
+        }), 201
+
     except Exception as e:
         db.session.rollback()
         return jsonify({
-            "status" : "error",
-            "message" : "Internal Server Error",
-            "error" : str(e)
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e)
         }), 500

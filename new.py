@@ -1352,3 +1352,105 @@ def add_codeOfConduct():
             "message" : "Internal Server Error",
             "error" : str(e)
         }), 500
+    
+
+
+
+
+#              this si th ndk dvjk fdcej
+#ce.;velkvrneirvn   wlr vl
+#vndkjsndfwfererhjowdmvcsijdveoni vrf
+#
+#
+
+
+
+@user.route('/punchin', methods=['POST'])
+def punch_details():
+    try:
+        # Validate form fields
+        login = request.form.get('login')
+        location = request.form.get('location')
+        image_file = request.files.get('image')
+
+        if not login or not location or not image_file:
+            return jsonify({
+                'status': 'error',
+                'message': 'All fields (login, location, image) are required'
+            }), 400
+
+        # Auth check
+        userId = g.user.get('userID') if g.user else None
+        if not userId:
+            return jsonify({
+                'status': 'error',
+                'message': 'User ID is missing or not authenticated'
+            }), 400
+
+        user = User.query.filter_by(id=userId).first()
+        if not user:
+            return jsonify({
+                'status': 'error',
+                'message': 'No user found with this ID'
+            }), 404
+
+        usersPanelData = user.panelData
+        if not usersPanelData:
+            return jsonify({
+                'status': 'error',
+                'message': 'No user panel data found'
+            }), 404
+
+        # Upload image to Cloudinary
+        try:
+            upload_result = cloudinary.uploader.upload(image_file)
+            image_url = upload_result.get('secure_url')
+        except Exception as e:
+            return jsonify({
+                'status': 'error',
+                'message': 'Failed to upload image to Cloudinary',
+                'error': str(e)
+            }), 500
+
+        # Parse login datetime
+        try:
+            login_time = datetime.fromisoformat(login)
+        except Exception:
+            return jsonify({
+                'status': 'error',
+                'message': 'Invalid datetime format for login (expected ISO format)'
+            }), 400
+
+        # Save punch-in data
+        punchin = PunchData(
+            panelData=usersPanelData.id,
+            empId=user.empId,
+            name=user.userName,
+            email=user.email,
+            login=login_time,
+            logout=None,
+            location=location,
+            totalhour=None,
+            productivehour=None,
+            shift=None,
+            status="present",
+            image=image_url
+        )
+
+        db.session.add(punchin)
+        db.session.commit()
+
+        return jsonify({
+            'status': 'success',
+            'message': 'Punch-in successful',
+            'punch_id': punchin.id,
+            'image_url': image_url
+        }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            'status': 'error',
+            'message': 'Error processing punch-in',
+            'error': str(e)
+        }), 500

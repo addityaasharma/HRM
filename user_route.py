@@ -1,4 +1,4 @@
-from models import User,UserPanelData,db,SuperAdmin,PunchData, UserTicket, UserDocument, UserChat, UserLeave
+from models import User,UserPanelData,db,SuperAdmin,PunchData, UserTicket, UserDocument, UserChat, UserLeave, ShiftTimeManagement
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask import Blueprint, request, json, jsonify, g
 from datetime import datetime,time, timedelta
@@ -194,60 +194,92 @@ def user_login():
 @user.route('/punchin', methods=['POST'])
 def punch_details():
     try:
-        data = request.get_json()
-        if not data:
-            return jsonify({
-                'status': 'error',
-                'message': 'No input data provided'
-            }), 400
+        login = request.form.get('login')
+        location = request.form.get('location')
+        image_file = request.files.get('image')
 
-        required_fields = ['login', 'location', 'image']
-        if not all(field in data for field in required_fields):
+        if not login or not location or not image_file:
             return jsonify({
                 'status': 'error',
-                'message': 'All fields are required',
+                'message': 'All fields (login, location, image) are required'
             }), 400
 
         userId = g.user.get('userID') if g.user else None
         if not userId:
-            return jsonify({
-                'status': 'error',
-                'message': 'User ID is missing or not authenticated'
-            }), 400
+            return jsonify({'status': 'error', 'message': 'User not authenticated'}), 400
 
         user = User.query.filter_by(id=userId).first()
         if not user:
-            return jsonify({
-                'status': 'error',
-                'message': 'No user found with this ID'
-            }), 404
+            return jsonify({'status': 'error', 'message': 'No user found'}), 404
+
+        superadmin = SuperAdmin.query.filter_by(superId=user.superadminId).first()
+        if not superadmin:
+            return jsonify({'status': 'error', 'message': 'Unauthorized user'}), 403
 
         usersPanelData = user.panelData
         if not usersPanelData:
+            return jsonify({'status': 'error', 'message': 'User panel data not found'}), 404
+
+        try:
+            login_time = datetime.fromisoformat(login)
+        except Exception:
+            return jsonify({'status': 'error', 'message': 'Invalid login time format'}), 400
+
+        today_start = datetime.combine(login_time.date(), datetime.min.time())
+        today_end = datetime.combine(login_time.date(), datetime.max.time())
+
+        existing_punch = PunchData.query.filter(
+            PunchData.empId == user.empId,
+            PunchData.login >= today_start,
+            PunchData.login <= today_end
+        ).first()
+
+        if existing_punch:
             return jsonify({
                 'status': 'error',
-                'message': 'No user panel data found'
+                'message': 'You have already punched in today.'
+            }), 409
+
+        shift = ShiftTimeManagement.query.filter_by(
+            shiftType=user.shift,
+            shiftStatus='enable',
+            superpanel=superadmin.superadminPanel.id
+        ).first()
+
+        if not shift:
+            return jsonify({
+                'status': 'error',
+                'message': f'No active {user.shift} shift set by admin'
             }), 404
 
-        image_data = data.get('image')
         try:
-            upload_result = cloudinary.uploader.upload(image_data)
+            upload_result = cloudinary.uploader.upload(image_file)
             image_url = upload_result.get('secure_url')
         except Exception as e:
             return jsonify({
                 'status': 'error',
-                'message': 'Failed to upload image to Cloudinary',
+                'message': 'Image upload failed',
                 'error': str(e)
             }), 500
 
-        try:
-            login_time = datetime.fromisoformat(data.get('login'))
-        except Exception:
+        max_early = shift.MaxEarly
+        grace_time = shift.GraceTime
+        max_late = shift.MaxLateEntry
+
+        if login_time < max_early:
             return jsonify({
                 'status': 'error',
-                'message': 'Invalid datetime format for login'
-            }), 400
+                'message': 'Too early to punch in'
+            }), 403
 
+        if login_time <= grace_time:
+            punch_status = 'ontime'
+        elif login_time <= max_late:
+            punch_status = 'late'
+        else:
+            punch_status = 'halfday'
+
+        # Save punch-in
         punchin = PunchData(
             panelData=usersPanelData.id,
             empId=user.empId,
@@ -255,11 +287,11 @@ def punch_details():
             email=user.email,
             login=login_time,
             logout=None,
-            location=data.get('location'),
+            location=location,
             totalhour=None,
             productivehour=None,
-            shift=None,
-            status="present",
+            shift=shift.shiftStart,
+            status=punch_status,
             image=image_url
         )
 
@@ -268,7 +300,7 @@ def punch_details():
 
         return jsonify({
             'status': 'success',
-            'message': 'Punch-in successful',
+            'message': f'Punch-in successful. Status: {punch_status}',
             'punch_id': punchin.id,
             'image_url': image_url
         }), 201
@@ -345,7 +377,7 @@ def get_punchDetails():
         }), 500
 
 
-@user.route('/punchin/<int:punchId>',methods=['PUT'])
+@user.route('/punchin/<int:punchId>', methods=['PUT'])
 def edit_punchDetails(punchId):
     data = request.get_json()
     if not data:
@@ -362,10 +394,8 @@ def edit_punchDetails(punchId):
         }), 400
 
     try:
-        # Convert logout datetime (auto-parse Zulu/UTC format)
         logout_time = datetime.fromisoformat(data.get('logout').replace('Z', '+00:00'))
 
-        # Convert totalHour string "HH:MM:SS" to time object
         total_hour_str = data.get('totalHour')
         try:
             h, m, s = map(int, total_hour_str.strip().split(':'))
@@ -376,7 +406,6 @@ def edit_punchDetails(punchId):
                 "message": "Invalid format for totalHour. Expected HH:MM:SS"
             }), 400
 
-        # Auth and user check
         userID = g.user.get('userID') if g.user else None
         if not userID:
             return jsonify({
@@ -391,24 +420,50 @@ def edit_punchDetails(punchId):
                 "message": "No user found with this ID"
             }), 404
 
-        punchdata = PunchData.query.filter_by(id=punchId).first()
+        punchdata = PunchData.query.filter_by(id=punchId, empId=user.empId).first()
         if not punchdata:
             return jsonify({
                 "status": "error",
                 "message": "No punch details found with this ID"
             }), 404
 
-        # Update
+        superadmin = SuperAdmin.query.filter_by(superId=user.superadminId).first()
+        if not superadmin:
+            return jsonify({
+                "status": "error",
+                "message": "Unauthorized user"
+            }), 403
+
+        shift = ShiftTimeManagement.query.filter_by(
+            shiftType=user.shift,
+            shiftStatus='enable',
+            superpanel=superadmin.superadminPanel.id
+        ).first()
+
+        if not shift:
+            return jsonify({
+                "status": "error",
+                "message": f"No active {user.shift} shift set by admin"
+            }), 404
+
+        logout_date = logout_time.date()
+        shift_end_time = datetime.combine(logout_date, shift.shiftEnd)
+
+        if logout_time < shift_end_time:
+            punch_status = 'halfday'
+        else:
+            punch_status = 'fullday'
+
         punchdata.logout = logout_time
         punchdata.location = data['location']
         punchdata.totalhour = total_hour_time
-        punchdata.status = 'fullday'
+        punchdata.status = punch_status
 
         db.session.commit()
 
         return jsonify({
             "status": "success",
-            "message": "Punch details updated successfully"
+            "message": f"Punch details updated successfully. Status: {punch_status}"
         }), 200
 
     except Exception as e:
@@ -418,6 +473,7 @@ def edit_punchDetails(punchId):
             "message": "Internal Server Error",
             "error": str(e)
         }), 500
+
 
 
 # ====================================
