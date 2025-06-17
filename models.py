@@ -1,6 +1,7 @@
 from datetime import datetime, time
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.dialects.mysql import ENUM
+from sqlalchemy.dialects.mysql import JSON
 
 
 db = SQLAlchemy()
@@ -37,6 +38,8 @@ class SuperAdminPanel(db.Model):
     adminAnnouncement = db.relationship('Announcement', backref='superadminpanel', lazy=True)
     adminBonusPolicy = db.relationship('BonusPolicy', backref='superadminpanel', lazy=True)
     adminTimePolicy = db.relationship('ShiftTimeManagement', backref='superadminpanel', lazy=True)
+    adminRemotePolicy = db.relationship('RemotePolicy', backref='superadminpanel', lazy=True)
+    adminPayrollPolicy = db.relationship('PayrollPolicy', backref='superadminpanel', lazy=True)
 
 class Announcement(db.Model):
     __tablename__ = 'announcement'
@@ -103,8 +106,7 @@ class ShiftTimeManagement(db.Model):
         default='dayshift', nullable=False
     )
     shiftStatus = db.Column(
-        ENUM('enable', 'disable', name='shift_status_name'),
-        default='disable'
+        db.Boolean, default=False
     )
     shiftStart = db.Column(db.DateTime, nullable=False)
     shiftEnd = db.Column(db.DateTime, nullable=False)
@@ -115,12 +117,11 @@ class ShiftTimeManagement(db.Model):
     OverTimeCountAfter = db.Column(db.DateTime, nullable=False)
     Biometric = db.Column(db.Boolean, default=False)
     RemoteCheckIn = db.Column(db.Boolean, default=False)
-    AutoLogout = db.Column(db.Boolean, default=True)
+    # AutoLogout = db.Column(db.Boolean, default=True)
     ShiftSwap = db.Column(db.Boolean, default=False)
 
     #relation
     superpanel = db.Column(db.Integer, db.ForeignKey('superadminpanel.id'), nullable=False)
-
 
 class BonusPolicy(db.Model):
     __tablename__ = 'bonuspolicy'
@@ -141,6 +142,39 @@ class BonusPolicy(db.Model):
     employeement_type = db.Column(db.String(120))
     department_type = db.Column(db.String(120))
 
+class RemotePolicy(db.Model):
+    __tablename__ = 'remotepolicy'
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    remoteName = db.Column(db.String(120))
+    remoteStatus = db.Column(db.Boolean, default=False)
+    max_remote_day = db.Column(db.Integer)
+    approval = db.Column(db.Boolean, default=False)
+    allowed_department = db.Column(db.String(120))
+    equipment_provided = db.Column(db.Boolean, default=False)
+    superPanel = db.Column(db.Integer, db.ForeignKey('superadminpanel.id'), nullable=False)
+
+
+class PayrollPolicy(db.Model):
+    __tablename__ = 'payrollpolicy'
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    calculation_method = db.Column(
+        ENUM('fixed' , 'attendancebased', name='calculation_method_name'),
+        default = 'attendancebased'
+    )
+    overtimePolicy = db.Column(
+        ENUM('paid', 'notapplicable', name = 'overtimePolicy_name'),
+        default = 'paid'
+    )
+    perhour = db.Column(db.Integer)
+    pfDeduction = db.Column(db.Boolean, default=False)
+    salaryHoldCondition = db.Column(JSON)
+    disbursement = db.Column(db.DateTime)
+    employeementType = db.Column(
+        ENUM('fulltime', 'parttime', name = 'employeement_type')
+    )
+    departmentType = db.Column(db.String(120))
+    superpanel = db.Column(db.Integer, db.ForeignKey('superadminpanel.id'), nullable=False)
+
 # ====================================
 #           USER SECTION              
 # ====================================
@@ -160,6 +194,10 @@ class User(db.Model):
     shift = db.Column(
         ENUM('dayshift', 'nightshift', name='user_shift'),
         default='dayshift'
+    )
+    workType = db.Column(
+        ENUM('onsite', 'remote', name='work_type_name'),
+        default='onsite',
     )
     
     # Contact Information

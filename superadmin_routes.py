@@ -1,4 +1,4 @@
-from models import SuperAdmin, SuperAdminPanel, db, PunchData, User, UserTicket, AdminLeave, AdminDoc, Announcement, PollOption, AdminLeave, BonusPolicy, UserLeave, UserPanelData, ShiftTimeManagement
+from models import SuperAdmin, SuperAdminPanel, db, PunchData, User, UserTicket, AdminLeave, AdminDoc, Announcement, PollOption, AdminLeave, BonusPolicy, UserLeave, UserPanelData, ShiftTimeManagement, RemotePolicy, PayrollPolicy
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask import Blueprint, request, jsonify, g
 from middleware import create_tokens
@@ -46,6 +46,22 @@ def gen_empId():
         new_number = 1
 
     return f"{random_letter}EMP{str(new_number).zfill(4)}"
+
+def get_authorized_superadmin():
+    userID = g.user.get('userID') if g.user else None
+    if not userID:
+        return None, jsonify({"status": "error", "message": "No auth token"}), 401
+
+    superadmin = SuperAdmin.query.filter_by(id=userID).first()
+    if not superadmin:
+        user = User.query.filter_by(id=userID).first()
+        if not user or user.userRole.lower() != 'hr':
+            return None, jsonify({"status": "error", "message": "Unauthorized"}), 403
+        superadmin = SuperAdmin.query.filter_by(superId=user.superadminId).first()
+        if not superadmin:
+            return None, jsonify({"status": "error", "message": "No superadmin found"}), 404
+
+    return superadmin, None, None
 
 
 # ====================================
@@ -453,6 +469,7 @@ def all_users_or_one(id):
                 'fieldOfStudy': user.fieldOfStudy,
                 'dateOfCompletion': user.dateOfCompletion.strftime("%Y-%m-%d") if user.dateOfCompletion else None,
                 'skills': user.skills,
+                'shift': user.shift,
                 'occupation': user.occupation,
                 'company': user.company,
                 'experience': user.experience,
@@ -579,7 +596,7 @@ def edit_user(userId):
             'uanNumber', 'department', 'onBoardingStatus', 'sourceOfHire',
             'currentSalary', 'joiningDate', 'schoolName', 'degree',
             'fieldOfStudy', 'dateOfCompletion', 'skills', 'occupation',
-            'company', 'experience', 'duration'
+            'company', 'experience', 'duration', 'shift'
         ]
 
         # Field type groups
@@ -591,7 +608,7 @@ def edit_user(userId):
             'permanentAddress', 'postal', 'city', 'state', 'country', 'nationality',
             'panNumber', 'adharNumber', 'uanNumber', 'department', 'onBoardingStatus',
             'sourceOfHire', 'schoolName', 'degree', 'fieldOfStudy', 'occupation',
-            'company', 'duration', 'userRole'
+            'company', 'duration', 'userRole', 'shift'
         ]
         text_fields = ['skills']
 
@@ -1685,33 +1702,41 @@ def get_bonus():
             return jsonify({"status": "error", "message": "No user or auth token provided"}), 404
 
         superadmin = SuperAdmin.query.filter_by(id=userID).first()
+
+        usersadmin = None
         if not superadmin:
             user = User.query.filter_by(id=userID).first()
-            usersadmin = SuperAdmin.query.filter_by(superId=user.superadminId).first()
-            if not user or not usersadmin:
+            if not user:
                 return jsonify({
-                    "status" : "success",
-                    "message" : "Unauthorized",
-                }), 409
-        
-        bonus = superadmin.superadminPanel.adminBonusPolicy if superadmin.superadminPanel.adminBonusPolicy else usersadmin.superadminPanel.adminBonusPolicy
-        if not bonus:
-            return jsonify({
-                "status" : "error",
-                "message" : "No leaves found"
-            }), 200
-        
+                    "status": "error",
+                    "message": "Unauthorized: user not found"
+                }), 401
 
-        bonusList= []
-        for bonuss in bonus:
+            usersadmin = SuperAdmin.query.filter_by(superId=user.superadminId).first()
+            if not usersadmin:
+                return jsonify({
+                    "status": "error",
+                    "message": "Unauthorized: superadmin not found"
+                }), 401
+
+        active_panel = superadmin.superadminPanel if superadmin else usersadmin.superadminPanel
+
+        if not active_panel.adminBonusPolicy:
+            return jsonify({
+                "status": "error",
+                "message": "No bonus policies found"
+            }), 200
+
+        bonusList = []
+        for bonuss in active_panel.adminBonusPolicy:
             bonusList.append({
-                "id" : bonuss.id,
-                "name" : bonuss.bonus_name,
-                "method" : bonuss.bonus_method,
-                "amount" : bonuss.amount,
-                "applyOn" : bonuss.apply,
-                "department_type" : bonuss.department_type,
-                "employeement_type" : bonuss.employeement_type,
+                "id": bonuss.id,
+                "name": bonuss.bonus_name,
+                "method": bonuss.bonus_method,
+                "amount": bonuss.amount,
+                "applyOn": bonuss.apply,
+                "department_type": bonuss.department_type,
+                "employeement_type": bonuss.employeement_type,
             })
 
         return jsonify({
@@ -1860,8 +1885,6 @@ def delete_bonus(id):
 #      SHIFT AND TIME SECTION               
 # ====================================
 
-from datetime import datetime  # Ensure this is imported
-
 @superAdminBP.route('/shift_time', methods=['POST'])
 def addshift():
     try:
@@ -1900,22 +1923,39 @@ def addshift():
                 "message": f"Missing fields. Required: {required_fields}"
             }), 400
 
+        shift_type = data['shiftType']
+        shift_status = bool(data['shiftStatus'])
+
+        if shift_status:
+            existing_active_shift = ShiftTimeManagement.query.filter_by(
+                shiftType=shift_type,
+                shiftStatus=True,
+                superpanel=superadmin.superadminPanel.id
+            ).first()
+
+            if existing_active_shift:
+                return jsonify({
+                    "status": "error",
+                    "message": f"An active shift with type '{shift_type}' already exists."
+                }), 409
+
+        time_format = '%Y-%m-%d %I:%M:%S %p'  # 12-hour with AM/PM
+
         shift = ShiftTimeManagement(
             shiftName=data['shiftName'],
-            shiftType=data['shiftType'],
-            shiftStatus=data['shiftStatus'],
-            shiftStart=datetime.strptime(data['shiftStart'], '%Y-%m-%d %H:%M:%S'),
-            shiftEnd=datetime.strptime(data['shiftEnd'], '%Y-%m-%d %H:%M:%S'),
-            GraceTime=datetime.strptime(data['GraceTime'], '%Y-%m-%d %H:%M:%S'),
-            MaxEarly=datetime.strptime(data['MaxEarly'], '%Y-%m-%d %H:%M:%S'),
-            MaxLateEntry=datetime.strptime(data['MaxLateEntry'], '%Y-%m-%d %H:%M:%S'),
-            HalfDayThreshhold=datetime.strptime(data['HalfDayThreshhold'], '%Y-%m-%d %H:%M:%S'),
-            OverTimeCountAfter=datetime.strptime(data['OverTimeCountAfter'], '%Y-%m-%d %H:%M:%S'),
+            shiftType=shift_type,
+            shiftStatus=shift_status,
+            shiftStart=datetime.strptime(data['shiftStart'], time_format),
+            shiftEnd=datetime.strptime(data['shiftEnd'], time_format),
+            GraceTime=datetime.strptime(data['GraceTime'], time_format),
+            MaxEarly=datetime.strptime(data['MaxEarly'], time_format),
+            MaxLateEntry=datetime.strptime(data['MaxLateEntry'], time_format),
+            HalfDayThreshhold=datetime.strptime(data['HalfDayThreshhold'], time_format),
+            OverTimeCountAfter=datetime.strptime(data['OverTimeCountAfter'], time_format),
             Biometric=data.get('Biometric', False),
             RemoteCheckIn=data.get('RemoteCheckIn', False),
-            AutoLogout=data.get('AutoLogout', True),
             ShiftSwap=data.get('ShiftSwap', False),
-            superpanel=superadmin.superadminPanel.id 
+            superpanel=superadmin.superadminPanel.id
         )
 
         db.session.add(shift)
@@ -1934,3 +1974,536 @@ def addshift():
             "message": "Internal Server Error",
             "error": str(e)
         }), 500
+
+
+@superAdminBP.route('/shift_time', methods=['GET'])
+def get_shift_policy():
+    try:
+        userID = g.user.get('userID') if g.user else None
+        if not userID:
+            return jsonify({
+                "status": "error",
+                "message": "No auth token provided"
+            }), 404
+
+        superadmin = SuperAdmin.query.filter_by(id=userID).first()
+        if not superadmin:
+            user = User.query.filter_by(id=userID).first()
+            if not user or user.userRole.lower() != 'hr':
+                return jsonify({
+                    "status": "error",
+                    "message": "Unauthorized",
+                }), 409
+            superadmin = SuperAdmin.query.filter_by(superId=user.superadminId).first()
+            if not superadmin:
+                return jsonify({
+                    "status": "error",
+                    "message": "Associated superadmin not found",
+                }), 409
+
+        shiftpolicy = superadmin.superadminPanel.adminTimePolicy
+        if not shiftpolicy or len(shiftpolicy) == 0:
+            return jsonify({
+                "status": "error",
+                "message": "No shift policies found",
+            }), 200
+
+        shiftlist = []
+        for shift in shiftpolicy:
+            shiftlist.append({
+                "id": shift.id,
+                "shiftName": shift.shiftName,
+                "shiftType": shift.shiftType,
+                "shiftStatus": shift.shiftStatus,
+                "shiftStart": shift.shiftStart.strftime('%Y-%m-%d %I:%M:%S %p') if shift.shiftStart else None,
+                "shiftEnd": shift.shiftEnd.strftime('%Y-%m-%d %I:%M:%S %p') if shift.shiftEnd else None,
+                "GraceTime": shift.GraceTime.strftime('%Y-%m-%d %I:%M:%S %p') if shift.GraceTime else None,
+                "MaxEarly": shift.MaxEarly.strftime('%Y-%m-%d %I:%M:%S %p') if shift.MaxEarly else None,
+                "MaxLateEntry": shift.MaxLateEntry.strftime('%Y-%m-%d %I:%M:%S %p') if shift.MaxLateEntry else None,
+                "HalfDayThreshhold": shift.HalfDayThreshhold.strftime('%Y-%m-%d %I:%M:%S %p') if shift.HalfDayThreshhold else None,
+                "OverTimeCountAfter": shift.OverTimeCountAfter.strftime('%Y-%m-%d %I:%M:%S %p') if shift.OverTimeCountAfter else None,
+                "Biometric": shift.Biometric,
+                "RemoteCheckIn": shift.RemoteCheckIn,
+                "ShiftSwap": shift.ShiftSwap
+            })
+
+        return jsonify({
+            "status": "success",
+            "message": "Shifts fetched successfully",
+            "data": shiftlist
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e)
+        }), 500
+
+
+@superAdminBP.route('/shift_time/<int:shift_id>', methods=['DELETE'])
+def delete_shift_policy(shift_id):
+    try:
+        userID = g.user.get('userID') if g.user else None
+        if not userID:
+            return jsonify({
+                "status": "error",
+                "message": "No auth token provided"
+            }), 404
+
+        superadmin = SuperAdmin.query.filter_by(id=userID).first()
+        if not superadmin:
+            user = User.query.filter_by(id=userID).first()
+            if not user or user.userRole.lower() != 'hr':
+                return jsonify({
+                    "status": "error",
+                    "message": "Unauthorized"
+                }), 403
+            superadmin = SuperAdmin.query.filter_by(superId=user.superadminId).first()
+            if not superadmin:
+                return jsonify({
+                    "status": "error",
+                    "message": "Associated superadmin not found"
+                }), 403
+
+        shift = ShiftTimeManagement.query.filter_by(id=shift_id, superpanel=superadmin.superadminPanel.id).first()
+        if not shift:
+            return jsonify({
+                "status": "error",
+                "message": "Shift not found or unauthorized"
+            }), 404
+
+        db.session.delete(shift)
+        db.session.commit()
+
+        return jsonify({
+            "status": "success",
+            "message": "Shift policy deleted successfully"
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e)
+        }), 500
+
+
+@superAdminBP.route('/shift_time/<int:shift_id>', methods=['PUT'])
+def edit_shift_policy(shift_id):
+    try:
+        userID = g.user.get('userID') if g.user else None
+        if not userID:
+            return jsonify({
+                "status": "error",
+                "message": "No auth token provided"
+            }), 404
+
+        superadmin = SuperAdmin.query.filter_by(id=userID).first()
+        if not superadmin:
+            user = User.query.filter_by(id=userID).first()
+            if not user or user.userRole.lower() != 'hr':
+                return jsonify({
+                    "status": "error",
+                    "message": "Unauthorized"
+                }), 403
+            superadmin = SuperAdmin.query.filter_by(superId=user.superadminId).first()
+            if not superadmin:
+                return jsonify({
+                    "status": "error",
+                    "message": "Associated superadmin not found"
+                }), 403
+
+        data = request.get_json()
+        if not data:
+            return jsonify({
+                "status": "error",
+                "message": "No data provided"
+            }), 400
+
+        shift = ShiftTimeManagement.query.filter_by(id=shift_id, superpanel=superadmin.superadminPanel.id).first()
+        if not shift:
+            return jsonify({
+                "status": "error",
+                "message": "Shift policy not found or unauthorized"
+            }), 404
+
+        updatable_fields = [
+            'shiftName', 'shiftType', 'shiftStatus', 'shiftStart', 'shiftEnd',
+            'GraceTime', 'MaxEarly', 'MaxLateEntry', 'HalfDayThreshhold',
+            'OverTimeCountAfter', 'Biometric', 'RemoteCheckIn', 'ShiftSwap'
+        ]
+
+        time_format = '%Y-%m-%d %I:%M:%S %p'
+
+        for field in updatable_fields:
+            if field in data:
+                value = data[field]
+                if field in ['shiftStart', 'shiftEnd', 'GraceTime', 'MaxEarly', 'MaxLateEntry', 'HalfDayThreshhold', 'OverTimeCountAfter']:
+                    try:
+                        value = datetime.strptime(value, time_format)
+                    except Exception:
+                        return jsonify({
+                            "status": "error",
+                            "message": f"Invalid datetime format for {field}, expected format: {time_format}"
+                        }), 400
+                setattr(shift, field, value)
+
+        db.session.commit()
+
+        return jsonify({
+            "status": "success",
+            "message": "Shift policy updated successfully"
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e)
+        }), 500
+
+
+# ====================================
+#      REMOTE WORK SECTION         
+# ====================================
+
+
+@superAdminBP.route('/remotework', methods=['POST'])
+def add_remoteWork():
+    try:
+        userID = g.user.get('userID') if g.user else None
+        if not userID:
+            return jsonify({
+                "status": "error",
+                "message": "No user ID or auth token"
+            }), 404
+
+        superadmin = SuperAdmin.query.filter_by(id=userID).first()
+        if not superadmin:
+            user = User.query.filter_by(id=userID).first()
+            if not user or user.userRole.lower() != 'hr':
+                return jsonify({
+                    "status": "error",
+                    "message": "Unauthorized"
+                }), 409
+            superadmin = SuperAdmin.query.filter_by(superId=user.superadminId).first()
+            if not superadmin:
+                return jsonify({
+                    "status": "error",
+                    "message": "No superadmin found"
+                }), 404
+
+        existing_policy = RemotePolicy.query.filter_by(superPanel=superadmin.superadminPanel.id).first()
+        if existing_policy:
+            return jsonify({
+                "status": "error",
+                "message": "Remote work policy already exists for this superadmin."
+            }), 400
+
+        # Get data from request
+        data = request.get_json()
+        required_fields = ['remoteName', 'max_remote_day', 'allowed_department']
+
+        if not data or not all(field in data for field in required_fields):
+            return jsonify({
+                "status": "error",
+                "message": f"Missing required fields: {', '.join(required_fields)}"
+            }), 400
+
+        # Create new RemotePolicy instance
+        new_policy = RemotePolicy(
+            remoteName=data.get('remoteName'),
+            remoteStatus=data.get('remoteStatus', False),
+            max_remote_day=data.get('max_remote_day'),
+            approval=data.get('approval', False),
+            allowed_department=data.get('allowed_department'),
+            equipment_provided=data.get('equipment_provided', False),
+            superPanel=superadmin.superadminPanel.id
+        )
+
+        db.session.add(new_policy)
+        db.session.commit()
+
+        return jsonify({
+            "status": "success",
+            "message": "Remote work policy created successfully."
+        }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e)
+        }), 500
+
+
+@superAdminBP.route('/remotework', methods=['GET'])
+def get_remote_work():
+    try:
+        userID = g.user.get('userID') if g.user else None
+        if not userID:
+            return jsonify({"status": "error", "message": "No user ID"}), 404
+
+        superadmin = SuperAdmin.query.filter_by(id=userID).first()
+        if not superadmin:
+            user = User.query.filter_by(id=userID).first()
+            if not user or user.userRole.lower() != 'hr':
+                return jsonify({"status": "error", "message": "Unauthorized"}), 403
+            superadmin = SuperAdmin.query.filter_by(superId=user.superadminId).first()
+            if not superadmin:
+                return jsonify({"status": "error", "message": "No superadmin found"}), 404
+
+        policy = RemotePolicy.query.filter_by(superPanel=superadmin.superadminPanel.id).first()
+        if not policy:
+            return jsonify({"status": "error", "message": "Remote policy not found"}), 404
+
+        return jsonify({
+            "status": "success",
+            "data": {
+                "id": policy.id,
+                "remoteName": policy.remoteName,
+                "remoteStatus": policy.remoteStatus,
+                "max_remote_day": policy.max_remote_day,
+                "approval": policy.approval,
+                "allowed_department": policy.allowed_department,
+                "equipment_provided": policy.equipment_provided,
+                "superPanel": policy.superPanel
+            }
+        }), 200
+
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@superAdminBP.route('/remotework/<int:id>', methods=['PUT'])
+def update_remote_work(id):
+    try:
+        data = request.get_json()
+        userID = g.user.get('userID') if g.user else None
+        if not userID:
+            return jsonify({"status": "error", "message": "No user ID"}), 404
+
+        superadmin = SuperAdmin.query.filter_by(id=userID).first()
+        if not superadmin:
+            user = User.query.filter_by(id=userID).first()
+            if not user or user.userRole.lower() != 'hr':
+                return jsonify({"status": "error", "message": "Unauthorized"}), 403
+            superadmin = SuperAdmin.query.filter_by(superId=user.superadminId).first()
+
+        policy = RemotePolicy.query.filter_by(id=id, superPanel=superadmin.superadminPanel.id).first()
+        if not policy:
+            return jsonify({"status": "error", "message": "Policy not found"}), 404
+
+        updatable_fields = ['remoteName', 'remoteStatus', 'max_remote_day', 'approval', 'allowed_department', 'equipment_provided']
+        for field in updatable_fields:
+            if field in data:
+                setattr(policy, field, data[field])
+
+        db.session.commit()
+
+        return jsonify({"status": "success", "message": "Remote policy updated"}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@superAdminBP.route('/remotework/<int:id>', methods=['DELETE'])
+def delete_remote_work(id):
+    try:
+        userID = g.user.get('userID') if g.user else None
+        if not userID:
+            return jsonify({"status": "error", "message": "No user ID"}), 404
+
+        superadmin = SuperAdmin.query.filter_by(id=userID).first()
+        if not superadmin:
+            user = User.query.filter_by(id=userID).first()
+            if not user or user.userRole.lower() != 'hr':
+                return jsonify({"status": "error", "message": "Unauthorized"}), 403
+            superadmin = SuperAdmin.query.filter_by(superId=user.superadminId).first()
+
+        policy = RemotePolicy.query.filter_by(id=id, superPanel=superadmin.superadminPanel.id).first()
+        if not policy:
+            return jsonify({"status": "error", "message": "Policy not found"}), 404
+
+        db.session.delete(policy)
+        db.session.commit()
+
+        return jsonify({"status": "success", "message": "Remote policy deleted"}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+# ====================================
+#      PAYROLL SECTION         
+# ====================================
+
+@superAdminBP.route('/payroll', methods=['POST'])
+def add_payroll():
+    try:
+        userID = g.user.get('userID') if g.user else None
+        if not userID:
+            return jsonify({
+                "status": "error",
+                "message": "No user ID or auth token"
+            }), 404
+
+        # Check if user is SuperAdmin or HR under a SuperAdmin
+        superadmin = SuperAdmin.query.filter_by(id=userID).first()
+        if not superadmin:
+            user = User.query.filter_by(id=userID).first()
+            if not user or user.userRole.lower() != 'hr':
+                return jsonify({
+                    "status": "error",
+                    "message": "Unauthorized"
+                }), 409
+            superadmin = SuperAdmin.query.filter_by(superId=user.superadminId).first()
+            if not superadmin:
+                return jsonify({
+                    "status": "error",
+                    "message": "No superadmin found"
+                }), 404
+
+        data = request.get_json()
+        if not data:
+            return jsonify({
+                "status": "error",
+                "message": "No data provided"
+            }), 400
+
+        required_fields = [
+            'calculation_method', 'overtimePolicy', 'perhour',
+            'pfDeduction', 'salaryHoldCondition', 'disbursement',
+            'employeementType', 'departmentType'
+        ]
+        if not all(field in data for field in required_fields):
+            return jsonify({
+                "status": "error",
+                "message": "Missing required fields"
+            }), 400
+
+        try:
+            disbursement = datetime.fromisoformat(data['disbursement'])
+        except ValueError:
+            return jsonify({
+                "status": "error",
+                "message": "Invalid disbursement datetime format. Use ISO 8601."
+            }), 400
+
+        policy = PayrollPolicy(
+            calculation_method=data['calculation_method'],
+            overtimePolicy=data['overtimePolicy'],
+            perhour=data['perhour'],
+            pfDeduction=data['pfDeduction'],
+            salaryHoldCondition=data['salaryHoldCondition'],  # should be a list/array
+            disbursement=disbursement,
+            employeementType=data['employeementType'],
+            departmentType=data['departmentType'],
+            superpanel=superadmin.id
+        )
+
+        db.session.add(policy)
+        db.session.commit()
+
+        return jsonify({
+            "status": "success",
+            "message": "Payroll policy added successfully"
+        }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e)
+        }), 500
+    
+
+@superAdminBP.route('/payroll', methods=['GET'])
+def get_payrolls():
+    try:
+        superadmin, err, status = get_authorized_superadmin()
+        if err:
+            return err, status
+
+        payrolls = PayrollPolicy.query.filter_by(superpanel=superadmin.superadminPanel.id).all()
+        results = [{
+            "id": p.id,
+            "calculation_method": p.calculation_method,
+            "overtimePolicy": p.overtimePolicy,
+            "perhour": p.perhour,
+            "pfDeduction": p.pfDeduction,
+            "salaryHoldCondition": p.salaryHoldCondition,
+            "disbursement": p.disbursement.isoformat() if p.disbursement else None,
+            "employeementType": p.employeementType,
+            "departmentType": p.departmentType
+        } for p in payrolls]
+
+        return jsonify({"status": "success", "data": results}), 200
+
+    except Exception as e:
+        return jsonify({"status": "error", "message": "Server error", "error": str(e)}), 500
+
+
+@superAdminBP.route('/payroll/<int:id>', methods=['PUT'])
+def update_payroll(id):
+    try:
+        superadmin, err, status = get_authorized_superadmin()
+        if err:
+            return err, status
+
+        policy = PayrollPolicy.query.filter_by(id=id, superpanel=superadmin.superadminPanel.id).first()
+        if not policy:
+            return jsonify({"status": "error", "message": "Payroll policy not found"}), 404
+
+        data = request.get_json()
+        if not data:
+            return jsonify({"status": "error", "message": "No data provided"}), 400
+
+        # Update fields if present
+        for field in [
+            'calculation_method', 'overtimePolicy', 'perhour', 'pfDeduction',
+            'salaryHoldCondition', 'employeementType', 'departmentType'
+        ]:
+            if field in data:
+                setattr(policy, field, data[field])
+
+        if 'disbursement' in data:
+            try:
+                policy.disbursement = datetime.fromisoformat(data['disbursement'])
+            except ValueError:
+                return jsonify({"status": "error", "message": "Invalid disbursement format"}), 400
+
+        db.session.commit()
+        return jsonify({"status": "success", "message": "Payroll policy updated"}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"status": "error", "message": "Server error", "error": str(e)}), 500
+
+
+@superAdminBP.route('/payroll/<int:id>', methods=['DELETE'])
+def delete_payroll(id):
+    try:
+        superadmin, err, status = get_authorized_superadmin()
+        if err:
+            return err, status
+
+        policy = PayrollPolicy.query.filter_by(id=id, superpanel=superadmin.superadminPanel.id).first()
+        if not policy:
+            return jsonify({"status": "error", "message": "Payroll policy not found"}), 404
+
+        db.session.delete(policy)
+        db.session.commit()
+        return jsonify({"status": "success", "message": "Payroll policy deleted"}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"status": "error", "message": "Server error", "error": str(e)}), 500

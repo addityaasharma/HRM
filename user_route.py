@@ -475,10 +475,10 @@ def edit_punchDetails(punchId):
         }), 500
 
 
-
 # ====================================
 #        USER DETAILS SECTION
 # ====================================
+
 
 @user.route('/profile', methods=['GET'])
 def get_Profile():
@@ -526,6 +526,7 @@ def get_Profile():
             'fieldOfStudy': user.fieldOfStudy,
             'dateOfCompletion': user.dateOfCompletion.strftime("%Y-%m-%d") if user.dateOfCompletion else None,
             'skills': user.skills,
+            'shift': user.shift,
             'occupation': user.occupation,
             'company': user.company,
             'experience': user.experience,
@@ -582,7 +583,7 @@ def edit_Profile():
             'adharNumber', 'uanNumber', 'department', 'onBoardingStatus',
             'sourceOfHire', 'currentSalary', 'joiningDate', 'schoolName',
             'degree', 'fieldOfStudy', 'dateOfCompletion', 'skills',
-            'occupation', 'company', 'experience', 'duration'
+            'occupation', 'company', 'experience', 'duration',
         ]
 
         for field in updatable_fields:
@@ -744,7 +745,7 @@ def get_ticket():
             "message": "Internal Server Error",
             "error": str(e)
         }), 500
-    
+
 
 # ====================================
 #        USER DOCUMENTS SECTION
