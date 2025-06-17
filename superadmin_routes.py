@@ -2398,6 +2398,7 @@ def add_payroll():
             }), 400
 
         policy = PayrollPolicy(
+            policyname = data['policyname'],
             calculation_method=data['calculation_method'],
             overtimePolicy=data['overtimePolicy'],
             perhour=data['perhour'],
@@ -2443,7 +2444,8 @@ def get_payrolls():
             "salaryHoldCondition": p.salaryHoldCondition,
             "disbursement": p.disbursement.isoformat() if p.disbursement else None,
             "employeementType": p.employeementType,
-            "departmentType": p.departmentType
+            "departmentType": p.departmentType,
+            "policyname": p.policyname,
         } for p in payrolls]
 
         return jsonify({"status": "success", "data": results}), 200
@@ -2470,7 +2472,7 @@ def update_payroll(id):
         # Update fields if present
         for field in [
             'calculation_method', 'overtimePolicy', 'perhour', 'pfDeduction',
-            'salaryHoldCondition', 'employeementType', 'departmentType'
+            'salaryHoldCondition', 'employeementType', 'departmentType', 'policyname'
         ]:
             if field in data:
                 setattr(policy, field, data[field])

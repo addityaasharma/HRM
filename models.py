@@ -98,7 +98,7 @@ class AdminLeave(db.Model):
     monthly_leave_limit = db.Column(db.Integer)
 
 class ShiftTimeManagement(db.Model):
-    __tablename__ = 'shiftAndTimeManagement'
+    __tablename__ = 'shiftandtimemanagement'
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     shiftName = db.Column(db.String(120), nullable=False)
     shiftType = db.Column(
@@ -157,6 +157,7 @@ class RemotePolicy(db.Model):
 class PayrollPolicy(db.Model):
     __tablename__ = 'payrollpolicy'
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    policyname = db.Column(db.String(120))
     calculation_method = db.Column(
         ENUM('fixed' , 'attendancebased', name='calculation_method_name'),
         default = 'attendancebased'
