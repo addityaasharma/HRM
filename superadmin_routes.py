@@ -1523,8 +1523,8 @@ def create_announcement():
         poll_question = request.form.get('poll_question')
         poll_options = request.form.getlist('poll_options') 
 
-        if not title or not content:
-            return jsonify({"status": "error", "message": "Title and content are required"}), 400
+        if not title:
+            return jsonify({"status": "error", "message": "Title is required"}), 400
 
         publish_now = True
         parsed_schedule = None
@@ -2691,7 +2691,7 @@ def delete_notice(notice_id):
 
 
 # ====================================
-#      EMPLOYEE DOC SECTION         
+#      EMPLOYEE DOC SECTION           
 # ====================================
 
 
@@ -2711,24 +2711,24 @@ def get_employee_documents():
         all_documents = []
 
         for user in users:
-            if search_query and search_query not in user.name.lower():
+            if search_query and search_query not in user.userName.lower():
                 continue
 
             panel_data = user.panelData
             if not panel_data:
                 continue
 
-            documents = panel_data.userDocuments
+            documents = panel_data.UserDocuments
             for doc in documents:
                 all_documents.append({
                     "user_id": user.id,
-                    "user_name": user.name,
+                    "user_name": user.userName,
                     "document_id": doc.id,
                     "document_name": doc.documents,
                     "document_url": doc.title,
-                })
+                }) 
 
-        all_documents.sort(key=lambda x: x['uploaded_at'], reverse=True)
+        # all_documents.sort(key=lambda x: x['uploaded_at'], reverse=True)
 
         total_documents = len(all_documents)
         paginated_docs = all_documents[offset:offset + limit]
