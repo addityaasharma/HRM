@@ -28,6 +28,7 @@ class SuperAdmin(db.Model):
     # master_id = db.Column(db.Integer, db.ForeignKey('master.id'), nullable=True)
     superadminPanel = db.relationship('SuperAdminPanel', backref='superadmin', uselist=False, lazy=True)  #superadmin panel
 
+
 class SuperAdminPanel(db.Model):
     __tablename__ = 'superadminpanel'
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
@@ -41,6 +42,7 @@ class SuperAdminPanel(db.Model):
     adminTimePolicy = db.relationship('ShiftTimeManagement', backref='superadminpanel', lazy=True)
     adminRemotePolicy = db.relationship('RemotePolicy', backref='superadminpanel', lazy=True)
     adminPayrollPolicy = db.relationship('PayrollPolicy', backref='superadminpanel', lazy=True)
+
 
 class Announcement(db.Model):
     __tablename__ = 'announcement'
@@ -269,6 +271,7 @@ class User(db.Model):
     panelData = db.relationship('UserPanelData', uselist=False, backref='user', lazy=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+
 class UserPanelData(db.Model):
     __tablename__ = 'userpaneldata'
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
@@ -287,6 +290,7 @@ class UserPanelData(db.Model):
     UserSalary = db.relationship('UserSalaryDetails', backref='user_panel', lazy=True)
     UserMessage = db.relationship('UserChat', backref='user_panel', lazy=True)
 
+
 class UserChat(db.Model):
     __tablename__ = 'messages'
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
@@ -295,6 +299,7 @@ class UserChat(db.Model):
     recieverID = db.Column(db.String(120), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
 
 class UserSalaryDetails(db.Model):
     __tablename__ = 'usersalarydetails'
@@ -310,6 +315,7 @@ class UserSalaryDetails(db.Model):
     status  = db.Column(db.String(12))
     payslip = db.Column(db.String(12))
     approvedLeaves = db.Column(db.String(12))
+
 
 class UserLeave(db.Model):                                           #user leave
     __tablename__ = 'userleave'
@@ -329,6 +335,7 @@ class UserLeave(db.Model):                                           #user leave
     unpaidDays = db.Column(db.Integer)
     createdAt = db.Column(db.DateTime, default=datetime.utcnow)
 
+
 class UserTicket(db.Model):
     __tablename__ = 'userticket'
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
@@ -343,6 +350,7 @@ class UserTicket(db.Model):
     status = db.Column(db.String(255))
     userticketpanel = db.Column(db.Integer, db.ForeignKey('userpaneldata.id'), nullable=False)
 
+
 class EmployeeRequest(db.Model):
     __tablename__ = 'employeerequest'
     id = db.Column(db.Integer, primary_key=True)
@@ -355,6 +363,7 @@ class EmployeeRequest(db.Model):
     itemType = db.Column(db.String(100), nullable=False)
     quantity = db.Column(db.String(100))
     action = db.Column(db.String(50))
+
 
 class JobInfo(db.Model):
     __tablename__ = 'jobinfo'
@@ -381,12 +390,14 @@ class JobInfo(db.Model):
     transfer_location = db.Column(db.String(120))
     reason_for_change = db.Column(db.String(120))
 
+
 class UserDocument(db.Model):
     __tablename__ = 'userdocument'
     id = db.Column(db.Integer, primary_key=True)
     panelDataID = db.Column(db.Integer, db.ForeignKey('userpaneldata.id'), nullable=False)
     documents = db.Column(db.String(255))
     title = db.Column(db.String(120))
+
 
 class UserAcheivements(db.Model):
     __tablename__ = 'useracheivement'
@@ -395,6 +406,7 @@ class UserAcheivements(db.Model):
     date = db.Column(db.DateTime)
     title = db.Column(db.String(120))
     acheivement = db.Column(db.String(120))
+
 
 class UserSalary(db.Model):
     __tablename__ = 'usersalary'
@@ -408,6 +420,7 @@ class UserSalary(db.Model):
     bankName = db.Column(db.String(200))
     accountNumber = db.Column(db.String(200))
     IFSC = db.Column(db.String(200))
+
 
 class PunchData(db.Model):
     __tablename__ = 'punchdata'
@@ -424,6 +437,7 @@ class PunchData(db.Model):
     productivehour = db.Column(db.DateTime)
     shift = db.Column(db.DateTime)
     status = db.Column(db.String(200))
+
 
 class UserHoliday(db.Model):
     __tablename__ = 'userholidays'

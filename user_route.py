@@ -1,4 +1,4 @@
-from models import User,UserPanelData,db,SuperAdmin,PunchData, UserTicket, UserDocument, UserChat, UserLeave, ShiftTimeManagement, Announcement
+from models import User,UserPanelData,db,SuperAdmin,PunchData, UserTicket, UserDocument, UserChat, UserLeave, ShiftTimeManagement, Announcement, Likes, Comments
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask import Blueprint, request, json, jsonify, g
 from datetime import datetime,time, timedelta
@@ -1436,7 +1436,7 @@ def check_pole():
                 "status": "error",
                 "message": "No user or auth token provided",
             }), 404
-        
+
         user = User.query.filter_by(id=userID).first()
         if not user:
             return jsonify({
@@ -1447,11 +1447,13 @@ def check_pole():
         data = request.get_json()
         announcement_id = data.get('announcement_id')
         selected_option = data.get('selected_option')
+        like = data.get('like')
+        comment_text = data.get('comment')
 
-        if not announcement_id or selected_option not in [1, 2, 3, 4]:
+        if not announcement_id:
             return jsonify({
                 "status": "error",
-                "message": "Invalid announcement ID or selected option",
+                "message": "Announcement ID is required",
             }), 400
 
         announcement = Announcement.query.filter_by(id=announcement_id).first()
@@ -1461,20 +1463,38 @@ def check_pole():
                 "message": "Announcement not found",
             }), 404
 
-        if selected_option == 1:
-            announcement.votes_option_1 += 1
-        elif selected_option == 2:
-            announcement.votes_option_2 += 1
-        elif selected_option == 3:
-            announcement.votes_option_3 += 1
-        elif selected_option == 4:
-            announcement.votes_option_4 += 1
+        if selected_option in [1, 2, 3, 4]:
+            if selected_option == 1:
+                announcement.votes_option_1 += 1
+            elif selected_option == 2:
+                announcement.votes_option_2 += 1
+            elif selected_option == 3:
+                announcement.votes_option_3 += 1
+            elif selected_option == 4:
+                announcement.votes_option_4 += 1
+
+        if like:
+            existing_like = Likes.query.filter_by(announcement_id=announcement_id, empId=user.empId).first()
+            if not existing_like:
+                new_like = Likes(
+                    announcement_id=announcement_id,
+                    empId=user.empId
+                )
+                db.session.add(new_like)
+
+        if comment_text:
+            new_comment = Comments(
+                announcement_id=announcement_id,
+                empId=user.empId,
+                comments=comment_text
+            )
+            db.session.add(new_comment)
 
         db.session.commit()
 
         return jsonify({
             "status": "success",
-            "message": "Vote recorded successfully"
+            "message": "Your action was recorded successfully"
         }), 200
 
     except Exception as e:
@@ -1484,3 +1504,87 @@ def check_pole():
             "message": "Internal Server Error",
             "error": str(e)
         }), 500
+
+
+@user.route('/pole', methods=['GET'])
+def get_pole():
+    try:
+        userID = g.user.get('userID') if g.user else None
+        if not userID:
+            return jsonify({
+                "status": "error",
+                "message": "No user or auth token"
+            }), 404
+        
+        user = User.query.filter_by(id=userID).first()
+        if not user:
+            return jsonify({
+                "status": "error",
+                "message": "No user found",
+            }), 404
+        
+        useradmin = SuperAdmin.query.filter_by(superId=user.superadminId).first()
+        if not useradmin:
+            return jsonify({
+                "status": "error",
+                "message": "Invalid user",
+            }), 404
+        
+        announcements = useradmin.superadminPanel.adminAnnouncement
+        if not announcements:
+            return jsonify({
+                "status": "success",
+                "message": "No announcements yet.",
+                "data": []
+            }), 200
+        
+        poll_announcements = []
+        for ann in announcements:
+            if ann.poll_question:
+                poll_announcements.append({
+                    "id": ann.id,
+                    "title": ann.title,
+                    "content": ann.content,
+                    "poll_question": ann.poll_question,
+                    "poll_options": [
+                        ann.poll_option_1,
+                        ann.poll_option_2,
+                        ann.poll_option_3,
+                        ann.poll_option_4
+                    ],
+                    "votes": {
+                        "option_1": ann.votes_option_1,
+                        "option_2": ann.votes_option_2,
+                        "option_3": ann.votes_option_3,
+                        "option_4": ann.votes_option_4,
+                    },
+                    "likes": len(ann.likes),
+                    "comments": [
+                        {
+                            "user": comment.userName,
+                            "text": comment.text,
+                            "created_at": comment.created_at.strftime("%Y-%m-%d %H:%M")
+                        }
+                        for comment in ann.comments
+                    ],
+                    "created_at": ann.created_at.strftime("%Y-%m-%d %H:%M"),
+                })
+
+        return jsonify({
+            "status": "success",
+            "message": "Poll announcements fetched",
+            "data": poll_announcements
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e),
+        }), 500
+
+
+# ====================================
+#        USER POLL SECTION
+# ====================================

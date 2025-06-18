@@ -2581,6 +2581,7 @@ def delete_payroll(id):
 #          NOTICE SECTION         
 # ====================================
 
+
 @superAdminBP.route('/notice', methods=['POST'])
 def add_notice():
     try:
