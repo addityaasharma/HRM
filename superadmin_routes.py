@@ -1,4 +1,4 @@
-from models import SuperAdmin, SuperAdminPanel, db, PunchData, User, UserTicket, AdminLeave, AdminDoc, Announcement, PollOption, AdminLeave, BonusPolicy, UserLeave, UserPanelData, ShiftTimeManagement, RemotePolicy, PayrollPolicy
+from models import SuperAdmin, SuperAdminPanel, db, PunchData, User, UserTicket, AdminLeave, AdminDoc, Announcement, AdminLeave, BonusPolicy, UserLeave, UserPanelData, ShiftTimeManagement, RemotePolicy, PayrollPolicy, Notice
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask import Blueprint, request, jsonify, g
 from middleware import create_tokens
@@ -10,7 +10,7 @@ import cloudinary.uploader
 from datetime import datetime
 import random
 import string
-import re
+import re, json
 import math
 
 
@@ -754,7 +754,7 @@ def editEmployee(id):
 # ====================================
 
 
-@superAdminBP.route('/getTickets', methods=['GET'])
+@superAdminBP.route('/ticket', methods=['GET'])
 def allTickets():
     try:
         userId = g.user.get('userID') if g.user else None
@@ -875,7 +875,7 @@ def allTickets():
         }), 500
 
 
-@superAdminBP.route('/edit-ticket/<int:ticket_id>', methods=['PUT'])
+@superAdminBP.route('/ticket/<int:ticket_id>', methods=['PUT'])
 def editTicket(ticket_id):
     data = request.get_json()
     if not data:
@@ -1513,71 +1513,110 @@ def delete_details(id):
 @superAdminBP.route('/announcement', methods=['POST'])
 def create_announcement():
     try:
-        userID = g.user.get('userID') if g.user else None
-        if not userID:
-            return jsonify({"status": "error", "message": "No user ID or auth token provided"}), 401
-        
-        adminpanelID = None
+        superadmin, err, status = get_authorized_superadmin()
+        if err:
+            return err, status
 
-        superadmin = SuperAdmin.query.filter_by(id=userID).first()
-        adminpanelID = superadmin.superadminPanel.id
-
+        title = request.form.get('title')
         content = request.form.get('content')
-        pollQuestion = request.form.get('pollQuestion')
-        pollOptions = request.form.getlist('pollOptions')
-        scheduleTime = request.form.get('scheduleTime')
+        scheduled_time = request.form.get('scheduled_time')
+        poll_question = request.form.get('poll_question')
+        poll_options = request.form.getlist('poll_options') 
 
-        image = request.files.get('image')
-        video = request.files.get('video')
+        if not title or not content:
+            return jsonify({"status": "error", "message": "Title and content are required"}), 400
 
-        imageURL = None
-        videoURL = None
-
-        if image:
-            upload_result = cloudinary.uploader.upload(image, resource_type="image")
-            imageURL = upload_result.get('secure_url')
-
-        if video:
-            upload_result = cloudinary.uploader.upload(video, resource_type="video")
-            videoURL = upload_result.get('secure_url')
-
-        schedule_time_obj = None
-        if scheduleTime:
+        publish_now = True
+        parsed_schedule = None
+        if scheduled_time:
             try:
-                from dateutil import parser
-                schedule_time_obj = parser.parse(scheduleTime)
-            except Exception:
-                return jsonify({"status": "error", "message": "Invalid schedule time"}), 400
+                parsed_schedule = datetime.fromisoformat(scheduled_time)
+                publish_now = False
+            except ValueError:
+                return jsonify({"status": "error", "message": "Invalid scheduled_time format (use ISO format)"}), 400
 
-        new_announcement = Announcement(
-            adminPanelId=adminpanelID,
+        uploaded_images = []
+        if 'images' in request.files:
+            images = request.files.getlist('images')
+            for image in images:
+                if image:
+                    upload_result = cloudinary.uploader.upload(image)
+                    uploaded_images.append(upload_result['secure_url'])
+
+        video_url = None
+        if 'video' in request.files:
+            video_file = request.files['video']
+            if video_file:
+                video_upload = cloudinary.uploader.upload(
+                    video_file,
+                    resource_type='video'
+                )
+                video_url = video_upload['secure_url']
+
+        poll_option_1 = poll_options[0] if len(poll_options) > 0 else None
+        poll_option_2 = poll_options[1] if len(poll_options) > 1 else None
+        poll_option_3 = poll_options[2] if len(poll_options) > 2 else None
+        poll_option_4 = poll_options[3] if len(poll_options) > 3 else None
+
+        announcement = Announcement(
+            title=title,
             content=content,
-            imageURL=imageURL,
-            videoURL=videoURL,
-            pollQuestion=pollQuestion,
-            scheduleTime=schedule_time_obj,
-            published=(not schedule_time_obj)
+            scheduled_time=parsed_schedule,
+            is_published=publish_now,
+            created_at=datetime.utcnow(),
+            adminPanelId=superadmin.superadminPanel.id,
+            poll_question=poll_question,
+            poll_option_1=poll_option_1,
+            poll_option_2=poll_option_2,
+            poll_option_3=poll_option_3,
+            poll_option_4=poll_option_4,
+            images=uploaded_images,
+            video=video_url
         )
 
-        db.session.add(new_announcement)
-        db.session.flush()
-
-        if pollQuestion and pollOptions:
-            for option_text in pollOptions:
-                if option_text:
-                    db.session.add(PollOption(
-                        announcementID=new_announcement.id,
-                        optionText=option_text
-                    ))
-
+        db.session.add(announcement)
         db.session.commit()
-        return jsonify({"status": "success", "message": "Announcement created successfully", "data" : {
-            "adminPanelID" : new_announcement.adminPanelId, "userpanel" : new_announcement.userPanelId, "userId" : new_announcement.userId
-        }}), 201
+
+        return jsonify({"status": "success", "message": "Announcement created successfully"}), 201
 
     except Exception as e:
         db.session.rollback()
-        return jsonify({"status": "error", "message": "Server error", "error": str(e)}), 500
+        return jsonify({
+            "status": "error",
+            "message": "Server error",
+            "error": str(e)
+        }), 500
+
+
+@superAdminBP.route('/announcement/<int:id>', methods=['DELETE'])
+def delete_announcement(id):
+    try:
+        superadmin, err, status = get_authorized_superadmin()
+        if err:
+            return err, status
+
+        announcement = Announcement.query.get(id)
+        if not announcement:
+            return jsonify({
+                "status": "error",
+                "message": f"Announcement with ID {id} not found."
+            }), 404
+
+        db.session.delete(announcement)
+        db.session.commit()
+
+        return jsonify({
+            "status": "success",
+            "message": f"Announcement with ID {id} has been deleted."
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Server error",
+            "error": str(e)
+        }), 500
 
 
 @superAdminBP.route('/announcement', methods=['GET'])
@@ -1587,23 +1626,50 @@ def get_announcement():
         if not userID:
             return jsonify({"status": "error", "message": "No user or auth token provided"}), 404
 
-        announcement_list = []
-
         superadmin = SuperAdmin.query.filter_by(id=userID).first()
-        if superadmin:
-            announcements = superadmin.superadminPanel.adminAnnouncement
+        if not superadmin:
+            return jsonify({"status": "error", "message": "SuperAdmin not found"}), 404
 
-        for ann in announcements:
+        # Get pagination params
+        page = request.args.get('page', 1, type=int)
+        limit = request.args.get('limit', 10, type=int)
+
+        # Query paginated announcements
+        query = Announcement.query.filter_by(adminPanelId=superadmin.superadminPanel.id)
+        pagination = query.order_by(Announcement.created_at.desc()).paginate(page=page, per_page=limit, error_out=False)
+
+        announcement_list = []
+        for ann in pagination.items:
             announcement_list.append({
-                "id" : ann.id,
-                "text" : ann.content,
+                "id": ann.id,
+                "title": ann.title,
+                "content": ann.content,
+                "images": ann.images,
+                "video": ann.video,
+                "scheduled_time": ann.scheduled_time.isoformat() if ann.scheduled_time else None,
+                "is_published": ann.is_published,
+                "created_at": ann.created_at.isoformat() if ann.created_at else None,
+                "poll_question": ann.poll_question,
+                "poll_option_1": ann.poll_option_1,
+                "poll_option_2": ann.poll_option_2,
+                "poll_option_3": ann.poll_option_3,
+                "poll_option_4": ann.poll_option_4,
+                "votes_option_1": ann.votes_option_1,
+                "votes_option_2": ann.votes_option_2,
+                "votes_option_3": ann.votes_option_3,
+                "votes_option_4": ann.votes_option_4,
             })
-
 
         return jsonify({
             "status": "success",
             "message": "Fetched successfully",
-            "data": announcement_list
+            "data": announcement_list,
+            "pagination": {
+                "page": pagination.page,
+                "per_page": pagination.per_page,
+                "total_pages": pagination.pages,
+                "total_items": pagination.total
+            }
         }), 200
 
     except Exception as e:
@@ -1692,7 +1758,7 @@ def add_bonus():
             "message": "Internal Server Error",
             "error": str(e)
         }), 500
-    
+
 
 @superAdminBP.route('/bonus', methods=['GET'])
 def get_bonus():
@@ -2509,3 +2575,98 @@ def delete_payroll(id):
     except Exception as e:
         db.session.rollback()
         return jsonify({"status": "error", "message": "Server error", "error": str(e)}), 500
+
+
+# ====================================
+#          NOTICE SECTION         
+# ====================================
+
+@superAdminBP.route('/notice', methods=['POST'])
+def add_notice():
+    try:
+        superadmin, err, status = get_authorized_superadmin()
+        if err:
+            return err, status
+
+        data = request.get_json()
+        if not data or not data.get('notice'):
+            return jsonify({"status": "error", "message": "Notice content is required"}), 400
+
+        new_notice = Notice(
+            id=int(datetime.utcnow().timestamp()),
+            superpanel=superadmin.superadminPanel.id,
+            notice=data['notice']
+        )
+
+        db.session.add(new_notice)
+        db.session.commit()
+
+        return jsonify({
+            "status": "success",
+            "message": "Notice added successfully"
+        }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e),
+        }), 500
+
+
+@superAdminBP.route('/notice', methods=['GET'])
+def get_notices():
+    try:
+        superadmin, err, status = get_authorized_superadmin()
+        if err:
+            return err, status
+
+        notices = Notice.query.filter_by(superpanel=superadmin.superadminPanel.id).all()
+        notice_list = [
+            {
+                "id": notice.id,
+                "notice": notice.notice
+            }
+            for notice in notices
+        ]
+
+        return jsonify({
+            "status": "success",
+            "data": notice_list
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e),
+        }), 500
+
+
+@superAdminBP.route('/notice/<int:notice_id>', methods=['DELETE'])
+def delete_notice(notice_id):
+    try:
+        superadmin, err, status = get_authorized_superadmin()
+        if err:
+            return err, status
+
+        notice = Notice.query.filter_by(id=notice_id, superpanel=superadmin.superadminPanel.id).first()
+        if not notice:
+            return jsonify({"status": "error", "message": "Notice not found"}), 404
+
+        db.session.delete(notice)
+        db.session.commit()
+
+        return jsonify({
+            "status": "success",
+            "message": "Notice deleted successfully"
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e),
+        }), 500

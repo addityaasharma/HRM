@@ -36,6 +36,7 @@ class SuperAdminPanel(db.Model):
     adminLeave = db.relationship('AdminLeave', backref='superadminpanel', lazy=True)
     adminDocs = db.relationship('AdminDoc', backref='superadminpanel', lazy=True)
     adminAnnouncement = db.relationship('Announcement', backref='superadminpanel', lazy=True)
+    adminNotice = db.relationship('Notice', backref='superadminpanel', lazy=True)
     adminBonusPolicy = db.relationship('BonusPolicy', backref='superadminpanel', lazy=True)
     adminTimePolicy = db.relationship('ShiftTimeManagement', backref='superadminpanel', lazy=True)
     adminRemotePolicy = db.relationship('RemotePolicy', backref='superadminpanel', lazy=True)
@@ -44,33 +45,56 @@ class SuperAdminPanel(db.Model):
 class Announcement(db.Model):
     __tablename__ = 'announcement'
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    adminPanelId = db.Column(db.Integer, db.ForeignKey('superadminpanel.id'),nullable=False)
+    title = db.Column(db.String(255), nullable=False)
     content = db.Column(db.Text)
-    imageURL = db.Column(db.String(300))
-    videoURL = db.Column(db.String(300))
-    pollQuestion = db.Column(db.String(200))
-    scheduleTime = db.Column(db.DateTime, nullable=True)
-    published = db.Column(db.Boolean, default=False)
-    createdAt = db.Column(db.DateTime, default=datetime.utcnow)
-    polloptions = db.relationship('PollOption', backref='announcement', lazy=True)
+    images = db.Column(db.JSON)
+    video = db.Column(db.String(255))
+    scheduled_time = db.Column(db.DateTime, nullable=True)
+    is_published = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-class PollOption(db.Model):
-    __tablename__ = 'polloption'
-    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    announcementID = db.Column(db.Integer, db.ForeignKey('announcement.id'), nullable=False)
-    optionText = db.Column(db.String(120), nullable=False)
-    voteCount = db.Column(db.Integer, default=0)
-    votes = db.relationship('PollVote', backref='polloption', lazy=True)
+    # Optional poll
+    poll_question = db.Column(db.String(255), nullable=True)
+    poll_option_1 = db.Column(db.String(255), nullable=True)
+    poll_option_2 = db.Column(db.String(255), nullable=True)
+    poll_option_3 = db.Column(db.String(255), nullable=True)
+    poll_option_4 = db.Column(db.String(255), nullable=True)
 
-class PollVote(db.Model):
-    __tablename__ = 'pollvote'
+    votes_option_1 = db.Column(db.Integer, default=0)
+    votes_option_2 = db.Column(db.Integer, default=0)
+    votes_option_3 = db.Column(db.Integer, default=0)
+    votes_option_4 = db.Column(db.Integer, default=0)
+
+    #relations
+    adminPanelId = db.Column(db.Integer, db.ForeignKey('superadminpanel.id'),nullable=False)
+    likes = db.relationship('Likes', backref='announcement', cascade='all, delete-orphan')
+    comments = db.relationship('Comments', backref='announcement', cascade='all, delete-orphan')
+
+
+class Likes(db.Model):
+    __tablename__ = 'likes'
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    userID = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    optionID = db.Column(db.Integer, db.ForeignKey('polloption.id'), nullable=False)
-    createdAt = db.Column(db.DateTime, default=datetime.utcnow)
-    __table_args__ = (
-        db.UniqueConstraint('userID', 'optionID', name='unique_user_option_vote'),
-    )
+    announcement_id = db.Column(db.Integer, db.ForeignKey('announcement.id'), nullable=False)
+    empId = db.Column(db.Integer)
+    liked_at = db.Column(db.DateTime, default=datetime.utcnow)
+    __table_args__ = (db.UniqueConstraint('announcement_id', 'empId', name='unique_user_like'),)
+
+
+class Comments(db.Model):
+    __tablename__ = 'comments'
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    announcement_id = db.Column(db.Integer, db.ForeignKey('announcement.id'), nullable=False)
+    empId = db.Column(db.Integer)
+    comments = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class Notice(db.Model):
+    __tablename__ = 'notice'
+    id = db.Column(db.Integer, primary_key=True, autoincrement=False)
+    superpanel = db.Column(db.Integer, db.ForeignKey('superadminpanel.id'), nullable=False)
+    notice = db.Column(db.Text)
+
 
 class AdminDoc(db.Model):
     __tablename__ = 'admindocuments'
@@ -78,6 +102,7 @@ class AdminDoc(db.Model):
     superadminPanel = db.Column(db.Integer, db.ForeignKey('superadminpanel.id'), nullable=False)
     document = db.Column(db.String(255))
     title = db.Column(db.String(255))
+
 
 class AdminLeave(db.Model):
     __tablename__ = 'adminleave'
@@ -96,6 +121,7 @@ class AdminLeave(db.Model):
     max_leave_once = db.Column(db.Integer)
     max_leave_year = db.Column(db.Integer)
     monthly_leave_limit = db.Column(db.Integer)
+
 
 class ShiftTimeManagement(db.Model):
     __tablename__ = 'shiftandtimemanagement'
@@ -123,6 +149,7 @@ class ShiftTimeManagement(db.Model):
     #relation
     superpanel = db.Column(db.Integer, db.ForeignKey('superadminpanel.id'), nullable=False)
 
+
 class BonusPolicy(db.Model):
     __tablename__ = 'bonuspolicy'
     id = db.Column(db.Integer, primary_key=True)
@@ -141,6 +168,7 @@ class BonusPolicy(db.Model):
     )
     employeement_type = db.Column(db.String(120))
     department_type = db.Column(db.String(120))
+
 
 class RemotePolicy(db.Model):
     __tablename__ = 'remotepolicy'

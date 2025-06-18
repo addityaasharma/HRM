@@ -14,6 +14,7 @@ app = Flask(__name__)
 class Config:
     SCHEDULER_API_ENABLED = True
 
+# CORS setup
 CORS(app, supports_credentials=True,
      resources={r"/*": {"origins": [
          "http://localhost:5173",
@@ -22,8 +23,9 @@ CORS(app, supports_credentials=True,
      expose_headers=["Content-Type", "Authorization"],
      allow_headers=["Content-Type", "Authorization"])
 
+# Database config
 MYSQL_USER = 'root'
-MYSQL_PASSWORD = '*****'
+MYSQL_PASSWORD = '*****'  # Keep this secret in production!
 MYSQL_HOST = 'localhost'
 MYSQL_DB = 'test'
 
@@ -41,33 +43,32 @@ app.register_blueprint(superAdminBP)
 scheduler = APScheduler()
 scheduler.init_app(app)
 
-with app.app_context():
-    db.create_all()  
-
-
 def publish_scheduled_announcements():
     with app.app_context():
         now = datetime.utcnow()
         announcements = Announcement.query.filter(
-            Announcement.scheduleTime <= now,
-            Announcement.published == False
+            Announcement.scheduled_time <= now,
+            Announcement.is_published == False
         ).all()
 
         for announcement in announcements:
-            announcement.published = True
+            announcement.is_published = True
 
         if announcements:
             db.session.commit()
             print(f"{len(announcements)} announcement(s) published at {now}.")
 
+with app.app_context():
+    db.create_all()
+
 if __name__ == '__main__':
-    scheduler.start()
     scheduler.add_job(
         id='publish_announcements',
         func=publish_scheduled_announcements,
         trigger='interval',
         seconds=60
     )
+    scheduler.start()
 
     socketio.init_app(app, cors_allowed_origins="*")
     socketio.run(app, debug=True, host="0.0.0.0", port=5000)

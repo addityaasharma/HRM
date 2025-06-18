@@ -1,4 +1,4 @@
-from models import User,UserPanelData,db,SuperAdmin,PunchData, UserTicket, UserDocument, UserChat, UserLeave, ShiftTimeManagement
+from models import User,UserPanelData,db,SuperAdmin,PunchData, UserTicket, UserDocument, UserChat, UserLeave, ShiftTimeManagement, Announcement
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask import Blueprint, request, json, jsonify, g
 from datetime import datetime,time, timedelta
@@ -1112,7 +1112,6 @@ def send_message():
 @user.route('/leave', methods=['POST'])
 def request_leave():
     data = request.get_json()
-    print(f"This is data: {data}")
     if not data:
         return jsonify({"message": "No data provided", "status": "error"}), 400
 
@@ -1421,8 +1420,67 @@ def get_leave_details():
     except Exception as e:
         db.session.rollback()
         return jsonify({"status": "error", "message": "Internal Server Error", "error": str(e)}), 500
-    
 
-@user.route('/route_name')
-def method_name():
-    pass
+
+# ====================================
+#        USER POLL SECTION
+# ====================================
+
+
+@user.route('/pole', methods=['POST'])
+def check_pole():
+    try:
+        userID = g.user.get('userID') if g.user else None
+        if not userID:
+            return jsonify({
+                "status": "error",
+                "message": "No user or auth token provided",
+            }), 404
+        
+        user = User.query.filter_by(id=userID).first()
+        if not user:
+            return jsonify({
+                "status": "error",
+                "message": "User not found",
+            }), 404
+
+        data = request.get_json()
+        announcement_id = data.get('announcement_id')
+        selected_option = data.get('selected_option')
+
+        if not announcement_id or selected_option not in [1, 2, 3, 4]:
+            return jsonify({
+                "status": "error",
+                "message": "Invalid announcement ID or selected option",
+            }), 400
+
+        announcement = Announcement.query.filter_by(id=announcement_id).first()
+        if not announcement:
+            return jsonify({
+                "status": "error",
+                "message": "Announcement not found",
+            }), 404
+
+        if selected_option == 1:
+            announcement.votes_option_1 += 1
+        elif selected_option == 2:
+            announcement.votes_option_2 += 1
+        elif selected_option == 3:
+            announcement.votes_option_3 += 1
+        elif selected_option == 4:
+            announcement.votes_option_4 += 1
+
+        db.session.commit()
+
+        return jsonify({
+            "status": "success",
+            "message": "Vote recorded successfully"
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e)
+        }), 500
