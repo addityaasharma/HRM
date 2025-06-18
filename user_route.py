@@ -1421,3 +1421,8 @@ def get_leave_details():
     except Exception as e:
         db.session.rollback()
         return jsonify({"status": "error", "message": "Internal Server Error", "error": str(e)}), 500
+    
+
+@user.route('/route_name')
+def method_name():
+    pass

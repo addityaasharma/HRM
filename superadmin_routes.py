@@ -1616,7 +1616,7 @@ def get_announcement():
 
 
 # ====================================
-#         BONUS SECTION               
+#         BONUS SECTION                
 # ====================================
 
 @superAdminBP.route('/bonus', methods=['POST'])
