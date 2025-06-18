@@ -2411,6 +2411,7 @@ def delete_remote_work(id):
 #      PAYROLL SECTION         
 # ====================================
 
+
 @superAdminBP.route('/payroll', methods=['POST'])
 def add_payroll():
     try:
@@ -2623,18 +2624,34 @@ def get_notices():
         if err:
             return err, status
 
-        notices = Notice.query.filter_by(superpanel=superadmin.superadminPanel.id).all()
+        # Get pagination parameters from query string
+        page = int(request.args.get('page', 1))
+        limit = int(request.args.get('limit', 10))
+        offset = (page - 1) * limit
+
+        total_notices = Notice.query.filter_by(superpanel=superadmin.superadminPanel.id).count()
+        notices = Notice.query.filter_by(superpanel=superadmin.superadminPanel.id)\
+                              .order_by(Notice.createdAt.desc())\
+                              .offset(offset).limit(limit).all()
+
         notice_list = [
             {
                 "id": notice.id,
-                "notice": notice.notice
+                "notice": notice.notice,
+                "date": notice.createdAt,
             }
             for notice in notices
         ]
 
         return jsonify({
             "status": "success",
-            "data": notice_list
+            "data": notice_list,
+            "pagination": {
+                "current_page": page,
+                "limit": limit,
+                "total_records": total_notices,
+                "total_pages": (total_notices + limit - 1) // limit
+            }
         }), 200
 
     except Exception as e:
@@ -2669,5 +2686,67 @@ def delete_notice(notice_id):
         return jsonify({
             "status": "error",
             "message": "Internal Server Error",
+            "error": str(e),
+        }), 500
+
+
+# ====================================
+#      EMPLOYEE DOC SECTION         
+# ====================================
+
+
+@superAdminBP.route('/employee_document', methods=['GET'])
+def get_employee_documents():
+    try:
+        superadmin, err, status = get_authorized_superadmin()
+        if err:
+            return err, status
+
+        page = int(request.args.get('page', 1))
+        limit = int(request.args.get('limit', 10))
+        search_query = request.args.get('search', '').lower()
+        offset = (page - 1) * limit
+
+        users = superadmin.superadminPanel.allUsers
+        all_documents = []
+
+        for user in users:
+            if search_query and search_query not in user.name.lower():
+                continue
+
+            panel_data = user.panelData
+            if not panel_data:
+                continue
+
+            documents = panel_data.userDocuments
+            for doc in documents:
+                all_documents.append({
+                    "user_id": user.id,
+                    "user_name": user.name,
+                    "document_id": doc.id,
+                    "document_name": doc.documents,
+                    "document_url": doc.title,
+                })
+
+        all_documents.sort(key=lambda x: x['uploaded_at'], reverse=True)
+
+        total_documents = len(all_documents)
+        paginated_docs = all_documents[offset:offset + limit]
+
+        return jsonify({
+            "status": "success",
+            "data": paginated_docs,
+            "pagination": {
+                "current_page": page,
+                "limit": limit,
+                "total_records": total_documents,
+                "total_pages": (total_documents + limit - 1) // limit
+            }
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server error",
             "error": str(e),
         }), 500

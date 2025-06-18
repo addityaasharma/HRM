@@ -96,6 +96,7 @@ class Notice(db.Model):
     id = db.Column(db.Integer, primary_key=True, autoincrement=False)
     superpanel = db.Column(db.Integer, db.ForeignKey('superadminpanel.id'), nullable=False)
     notice = db.Column(db.Text)
+    createdAt = db.Column(db.DateTime, default=datetime.utcnow())
 
 
 class AdminDoc(db.Model):

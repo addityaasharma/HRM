@@ -1515,65 +1515,76 @@ def get_pole():
                 "status": "error",
                 "message": "No user or auth token"
             }), 404
-        
+
         user = User.query.filter_by(id=userID).first()
         if not user:
             return jsonify({
                 "status": "error",
                 "message": "No user found",
             }), 404
-        
+
         useradmin = SuperAdmin.query.filter_by(superId=user.superadminId).first()
         if not useradmin:
             return jsonify({
                 "status": "error",
                 "message": "Invalid user",
             }), 404
-        
-        announcements = useradmin.superadminPanel.adminAnnouncement
-        if not announcements:
-            return jsonify({
-                "status": "success",
-                "message": "No announcements yet.",
-                "data": []
-            }), 200
-        
+
+        # Pagination params
+        page = int(request.args.get('page', 1))
+        limit = int(request.args.get('limit', 10))
+        offset = (page - 1) * limit
+
+        # Filter only poll announcements and sort by latest
+        query = Announcement.query.filter(
+            Announcement.adminPanelId == useradmin.superadminPanel.id,
+            Announcement.poll_question.isnot(None)
+        ).order_by(Announcement.created_at.desc())
+
+        total = query.count()
+        announcements = query.offset(offset).limit(limit).all()
+
         poll_announcements = []
         for ann in announcements:
-            if ann.poll_question:
-                poll_announcements.append({
-                    "id": ann.id,
-                    "title": ann.title,
-                    "content": ann.content,
-                    "poll_question": ann.poll_question,
-                    "poll_options": [
-                        ann.poll_option_1,
-                        ann.poll_option_2,
-                        ann.poll_option_3,
-                        ann.poll_option_4
-                    ],
-                    "votes": {
-                        "option_1": ann.votes_option_1,
-                        "option_2": ann.votes_option_2,
-                        "option_3": ann.votes_option_3,
-                        "option_4": ann.votes_option_4,
-                    },
-                    "likes": len(ann.likes),
-                    "comments": [
-                        {
-                            "user": comment.userName,
-                            "text": comment.text,
-                            "created_at": comment.created_at.strftime("%Y-%m-%d %H:%M")
-                        }
-                        for comment in ann.comments
-                    ],
-                    "created_at": ann.created_at.strftime("%Y-%m-%d %H:%M"),
-                })
+            poll_announcements.append({
+                "id": ann.id,
+                "title": ann.title,
+                "content": ann.content,
+                "poll_question": ann.poll_question,
+                "poll_options": [
+                    ann.poll_option_1,
+                    ann.poll_option_2,
+                    ann.poll_option_3,
+                    ann.poll_option_4
+                ],
+                "votes": {
+                    "option_1": ann.votes_option_1,
+                    "option_2": ann.votes_option_2,
+                    "option_3": ann.votes_option_3,
+                    "option_4": ann.votes_option_4,
+                },
+                "likes": len(ann.likes),
+                "comments": [
+                    {
+                        "user": comment.empId,  # Replace with user name if available
+                        "text": comment.comments,
+                        "created_at": comment.created_at.strftime("%Y-%m-%d %H:%M")
+                    }
+                    for comment in ann.comments
+                ],
+                "created_at": ann.created_at.strftime("%Y-%m-%d %H:%M"),
+            })
 
         return jsonify({
             "status": "success",
             "message": "Poll announcements fetched",
-            "data": poll_announcements
+            "data": poll_announcements,
+            "pagination": {
+                "current_page": page,
+                "limit": limit,
+                "total_records": total,
+                "total_pages": (total + limit - 1) // limit
+            }
         }), 200
 
     except Exception as e:
@@ -1583,6 +1594,7 @@ def get_pole():
             "message": "Internal Server Error",
             "error": str(e),
         }), 500
+
 
 
 # ====================================
