@@ -1069,7 +1069,7 @@ def send_message():
         recieverId = data['recieverID']
         message_text = data['message']
 
-        reciever = User.query.filter_by(empId=recieverId).first()
+        reciever = User.query.filter_by(id=recieverId).first()
         if not reciever:
             return jsonify({"status": "error", "message": "Receiver not found"}), 404
 
@@ -1080,7 +1080,7 @@ def send_message():
         message = UserChat(
             panelData=user.panelData.id,
             senderID=user.empId,
-            recieverID=recieverId,
+            recieverID=reciever.empId,
             message=message_text,
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow()
@@ -1088,10 +1088,9 @@ def send_message():
 
         db.session.add(message)
         db.session.commit()
-
         socketio.emit('receive_message', {
             'senderID': user.empId,
-            'recieverID': recieverId,
+            'recieverID': reciever.empId,
             'message': message_text,
             'timestamp': str(message.created_at)
         }, room=recieverId)
@@ -1103,6 +1102,42 @@ def send_message():
     except Exception as e:
         db.session.rollback()
         return jsonify({"status": "error", "message": "Internal Server Error", "error": str(e)}), 500
+    
+
+@user.route('/message/<string:with_empId>', methods=['GET'])
+def get_chat_messages(with_empId):
+    try:
+        userID = g.user.get('userID') if g.user else None
+        if not userID:
+            return jsonify({"status": "error", "message": "No user or auth token provided"}), 404
+
+        user = User.query.filter_by(id=userID).first()
+        if not user or not user.panelData:
+            return jsonify({"status": "error", "message": "User or panel data not found"}), 404
+
+        sender_empId = user.empId
+
+        chats = UserChat.query.filter(
+            ((UserChat.senderID == sender_empId) & (UserChat.recieverID == with_empId)) |
+            ((UserChat.senderID == with_empId) & (UserChat.recieverID == sender_empId))
+        ).order_by(UserChat.created_at.asc()).all()
+
+        messages = [{
+            "id": chat.id,
+            "senderID": chat.senderID,
+            "receiverID": chat.recieverID,
+            "message": chat.message,
+            "created_at": chat.created_at.isoformat()
+        } for chat in chats]
+
+        return jsonify({"status": "success", "messages": messages}), 200
+
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": "Internal server error",
+            "error": str(e)
+        }), 500
 
 
 # ====================================

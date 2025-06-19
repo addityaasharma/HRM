@@ -1,4 +1,4 @@
-from models import SuperAdmin, SuperAdminPanel, db, PunchData, User, UserTicket, AdminLeave, AdminDoc, Announcement, AdminLeave, BonusPolicy, UserLeave, UserPanelData, ShiftTimeManagement, RemotePolicy, PayrollPolicy, Notice
+from models import SuperAdmin, SuperAdminPanel, db, PunchData, User, UserTicket, AdminLeave, AdminDoc, Announcement, AdminLeave, BonusPolicy, UserLeave, UserPanelData, ShiftTimeManagement, RemotePolicy, PayrollPolicy, Notice, TaskManagement, TaskUser, TaskComments
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask import Blueprint, request, jsonify, g
 from middleware import create_tokens
@@ -1521,7 +1521,7 @@ def create_announcement():
         content = request.form.get('content')
         scheduled_time = request.form.get('scheduled_time')
         poll_question = request.form.get('poll_question')
-        poll_options = request.form.getlist('poll_options') 
+        poll_options = request.form.getlist('poll_options')
 
         if not title:
             return jsonify({"status": "error", "message": "Title is required"}), 400
@@ -1530,10 +1530,14 @@ def create_announcement():
         parsed_schedule = None
         if scheduled_time:
             try:
-                parsed_schedule = datetime.fromisoformat(scheduled_time)
+                fixed_time = scheduled_time.replace("+05+30", "+05:30")
+                parsed_schedule = parser.isoparse(fixed_time)
                 publish_now = False
-            except ValueError:
-                return jsonify({"status": "error", "message": "Invalid scheduled_time format (use ISO format)"}), 400
+            except (ValueError, TypeError):
+                return jsonify({
+                    "status": "error",
+                    "message": "Invalid scheduled_time format (use ISO 8601 like 2025-06-18T15:25:00+05:30)"
+                }), 400
 
         uploaded_images = []
         if 'images' in request.files:
@@ -1634,7 +1638,6 @@ def get_announcement():
         page = request.args.get('page', 1, type=int)
         limit = request.args.get('limit', 10, type=int)
 
-        # Query paginated announcements
         query = Announcement.query.filter_by(adminPanelId=superadmin.superadminPanel.id)
         pagination = query.order_by(Announcement.created_at.desc()).paginate(page=page, per_page=limit, error_out=False)
 
@@ -2702,15 +2705,23 @@ def get_employee_documents():
         if err:
             return err, status
 
+        user_id = request.args.get('id', type=int)
         page = int(request.args.get('page', 1))
         limit = int(request.args.get('limit', 10))
         search_query = request.args.get('search', '').lower()
         offset = (page - 1) * limit
 
         users = superadmin.superadminPanel.allUsers
+
         all_documents = []
+        matched_user_found = False
 
         for user in users:
+            if user_id:
+                if user.id != user_id:
+                    continue
+                matched_user_found = True
+
             if search_query and search_query not in user.userName.lower():
                 continue
 
@@ -2726,9 +2737,14 @@ def get_employee_documents():
                     "document_id": doc.id,
                     "document_name": doc.documents,
                     "document_url": doc.title,
-                }) 
+                })
 
-        # all_documents.sort(key=lambda x: x['uploaded_at'], reverse=True)
+        # Handle case: user_id was given but not found
+        if user_id and not matched_user_found:
+            return jsonify({
+                "status": "error",
+                "message": f"No user found with id {user_id}"
+            }), 404
 
         total_documents = len(all_documents)
         paginated_docs = all_documents[offset:offset + limit]
@@ -2749,4 +2765,140 @@ def get_employee_documents():
             "status": "error",
             "message": "Internal Server error",
             "error": str(e),
+        }), 500
+
+
+# ====================================
+#      PROJECT MANAGEMENT SECTION           
+# ====================================
+
+
+@superAdminBP.route('/project', methods=['POST'])
+def add_Project():
+    try:
+        superadmin, err, status = get_authorized_superadmin()
+        if err:
+            return err, status
+
+        title = request.form.get('title')
+        description = request.form.get('description')
+        lastDate = request.form.get('lastDate')
+
+        links = request.form.getlist('links') or []
+        files = request.form.getlist('files') or []
+
+        emp_ids = request.form.getlist('empIDs')
+        if not title or not lastDate:
+            return jsonify({
+                "status": "error",
+                "message": "Title and Last Date are required."
+            }), 400
+
+        try:
+            lastDate_dt = datetime.fromisoformat(lastDate)
+        except ValueError:
+            return jsonify({
+                "status": "error",
+                "message": "Invalid date format for 'lastDate'. Use YYYY-MM-DD or ISO."
+            }), 400
+
+        new_task = TaskManagement(
+            superpanelId=superadmin.superadminPanel.id,
+            title=title,
+            description=description,
+            lastDate=lastDate_dt,
+            links=links,
+            files=files
+        )
+        db.session.add(new_task)
+        db.session.flush()
+
+        for emp_id in emp_ids:
+            user = User.query.filter_by(empId=emp_id).first()
+            if user and user.panelData:
+                user_panel = user.panelData
+                task_user = TaskUser(
+                    taskPanelId=new_task.id,
+                    userPanelId=user_panel.id,
+                    user_emp_id=user.empId,
+                    usersName=getattr(user, 'userName', 'Unknown'),  # fallback if name not present
+                    image=getattr(user, 'profileImage', '')
+                )
+                db.session.add(task_user)
+            else:
+                print(f"⚠️ No user found for emp_id: {emp_id}")
+
+        db.session.commit()
+
+        return jsonify({
+            "status": "success",
+            "message": "Project and task assignments added successfully",
+            "taskId": new_task.id
+        }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e)
+        }), 500
+
+    
+
+@superAdminBP.route('/project', methods=['GET'])
+def get_all_projects():
+    try:
+        superadmin, err, status = get_authorized_superadmin()
+        if err:
+            return err, status
+
+        tasks = TaskManagement.query.filter_by(
+            superpanelId=superadmin.superadminPanel.id
+        ).order_by(TaskManagement.assignedAt.desc()).all()
+
+        task_list = []
+        for task in tasks:
+            comments = []
+            for comment in task.comments:
+                comments.append({
+                    "id": comment.id,
+                    "userId": comment.userId,
+                    "username": comment.username,
+                    "comment": comment.comments,
+                    "timestamp": comment.timestamp.isoformat() if hasattr(comment, "timestamp") and comment.timestamp else None
+                })
+
+            assigned_users = []
+            for user in task.users:
+                assigned_users.append({
+                    "userPanelId": user.userPanelId,
+                    "empId": user.user_emp_id,
+                    "userName": user.user_userName,
+                    "image": user.image,
+                    "isCompleted": user.is_completed
+                })
+
+            task_list.append({
+                "id": task.id,
+                "title": task.title,
+                "description": task.description,
+                "assignedAt": task.assignedAt.isoformat() if task.assignedAt else None,
+                "lastDate": task.lastDate.isoformat() if task.lastDate else None,
+                "links": task.links,
+                "files": task.files,
+                "comments": comments,
+                "assignedUsers": assigned_users
+            })
+
+        return jsonify({
+            "status": "success",
+            "tasks": task_list
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e)
         }), 500

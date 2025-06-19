@@ -1,16 +1,17 @@
 from flask import Flask
 from flask_cors import CORS
 from flask_migrate import Migrate
+from flask_apscheduler import APScheduler
+from datetime import datetime, timezone, timedelta
 from models import db, Announcement
 from user_route import user
 from superadmin_routes import superAdminBP
 from middleware import auth_middleware
 from socket_instance import socketio
-from flask_apscheduler import APScheduler
-from datetime import datetime
 
 app = Flask(__name__)
 
+# App config
 class Config:
     SCHEDULER_API_ENABLED = True
 
@@ -25,7 +26,7 @@ CORS(app, supports_credentials=True,
 
 # Database config
 MYSQL_USER = 'root'
-MYSQL_PASSWORD = '*****'  # Keep this secret in production!
+MYSQL_PASSWORD = '*****'  # Replace with a secure secret in production
 MYSQL_HOST = 'localhost'
 MYSQL_DB = 'test'
 
@@ -33,9 +34,9 @@ app.config['SQLALCHEMY_DATABASE_URI'] = f"mysql+pymysql://{MYSQL_USER}:{MYSQL_PA
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config.from_object(Config())
 
+# Extensions initialization
 db.init_app(app)
 migrate = Migrate(app, db)
-
 auth_middleware(app)
 app.register_blueprint(user)
 app.register_blueprint(superAdminBP)
@@ -45,18 +46,28 @@ scheduler.init_app(app)
 
 def publish_scheduled_announcements():
     with app.app_context():
-        now = datetime.utcnow()
+        ist = timezone(timedelta(hours=5, minutes=30))
+        now = datetime.now(ist)
+        print(f"[Scheduler] Checking for announcements at {now.isoformat()}")
+
+        # Now filter using IST time
         announcements = Announcement.query.filter(
             Announcement.scheduled_time <= now,
             Announcement.is_published == False
         ).all()
 
-        for announcement in announcements:
-            announcement.is_published = True
+        print(f"[Scheduler] Found {len(announcements)} announcements to publish")
+
+        for a in announcements:
+            print(f"  - Publishing: {a.title} (scheduled for {a.scheduled_time})")
+            a.is_published = True
 
         if announcements:
             db.session.commit()
-            print(f"{len(announcements)} announcement(s) published at {now}.")
+            print(f"[Scheduler] Published {len(announcements)} announcement(s)")
+        else:
+            print("[Scheduler] No announcements to publish.")
+
 
 with app.app_context():
     db.create_all()

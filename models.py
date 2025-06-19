@@ -42,6 +42,7 @@ class SuperAdminPanel(db.Model):
     adminTimePolicy = db.relationship('ShiftTimeManagement', backref='superadminpanel', lazy=True)
     adminRemotePolicy = db.relationship('RemotePolicy', backref='superadminpanel', lazy=True)
     adminPayrollPolicy = db.relationship('PayrollPolicy', backref='superadminpanel', lazy=True)
+    adminTaskManagement = db.relationship('TaskManagement', backref='superadminpanel', lazy=True)
 
 
 class Announcement(db.Model):
@@ -290,16 +291,53 @@ class UserPanelData(db.Model):
     UserDocuments = db.relationship('UserDocument', backref='user_panel', lazy=True)
     UserSalary = db.relationship('UserSalaryDetails', backref='user_panel', lazy=True)
     UserMessage = db.relationship('UserChat', backref='user_panel', lazy=True)
+    MyTasks = db.relationship('TaskUser', backref='user_panel', lazy=True)
 
 
 class UserChat(db.Model):
     __tablename__ = 'messages'
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     panelData = db.Column(db.Integer, db.ForeignKey('userpaneldata.id'), nullable=False)
-    senderID = db.Column(db.Integer,nullable=False)
+    senderID = db.Column(db.String(120),nullable=False)
     recieverID = db.Column(db.String(120), nullable=False)
+    message = db.Column(db.Text, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class TaskManagement(db.Model):
+    __tablename__ = 'taskmanagement'
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    superpanelId = db.Column(db.Integer, db.ForeignKey('superadminpanel.id'), nullable=False)
+    title = db.Column(db.String(120))
+    description = db.Column(db.String(255))
+    assignedAt = db.Column(db.DateTime, default=datetime.utcnow)
+    lastDate = db.Column(db.DateTime)
+    links = db.Column(db.JSON)
+    files = db.Column(db.JSON)
+    comments = db.relationship('TaskComments',backref='taskmanagement', cascade='all, delete-orphan')
+    users = db.relationship('TaskUser',backref='taskmanagement', cascade='all, delete-orphan')
+
+
+class TaskComments(db.Model):
+    __tablename__ = 'taskcomment'
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    taskPanelId = db.Column(db.Integer, db.ForeignKey('taskmanagement.id'), nullable=False)
+    taskId = db.Column(db.Integer)
+    userId = db.Column(db.String(120))
+    username = db.Column(db.String(120))
+    comments = db.Column(db.String(255))
+
+
+class TaskUser(db.Model):
+    __tablename__ = 'taskuser'
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    taskPanelId = db.Column(db.Integer, db.ForeignKey('taskmanagement.id'), nullable=False)
+    userPanelId = db.Column(db.Integer, db.ForeignKey('userpaneldata.id'), nullable=False)
+    is_completed = db.Column(db.Boolean, default=False)
+    user_emp_id = db.Column(db.String(120))
+    user_userName = db.Column(db.String(120))
+    image = db.Column(db.String(255))
 
 
 class UserSalaryDetails(db.Model):
