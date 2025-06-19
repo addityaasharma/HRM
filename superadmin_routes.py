@@ -199,13 +199,39 @@ def get_myDetails():
 
         superadmin = SuperAdmin.query.filter_by(id=userId).first()
         if superadmin:
+            panel = superadmin.superadminPanel
+            admin_detail = panel.adminDetail if panel else None
+
             adminDetails = {
                 "id": superadmin.id,
                 "companyName": superadmin.companyName,
                 "companyEmail": superadmin.companyEmail,
+                "company_type": superadmin.company_type,
+                "company_website": superadmin.company_website,
+                "company_estabilish": superadmin.company_estabilish.strftime('%Y-%m-%d') if superadmin.company_estabilish else None,
+                "company_years": superadmin.company_years,
+                "is_super_admin": superadmin.is_super_admin,
             }
+
+            if admin_detail:
+                adminDetails.update({
+                    "legalName": admin_detail.legalName,
+                    "panNumber": admin_detail.panNumber,
+                    "cinNumber": admin_detail.cinNumber,
+                    "udyamNumber": admin_detail.udyamNumber,
+                    "gstNumber": admin_detail.gstNumber,
+                    "officialmail": admin_detail.officialmail,
+                    "phoneNumber": admin_detail.phoneNumber,
+                    "linkedin": admin_detail.linkedin,
+                    "twitter": admin_detail.twitter,
+                    "ceo": admin_detail.ceo,
+                    "cto": admin_detail.cto,
+                    "hrmanager": admin_detail.hrmanager
+                })
+
             return jsonify({"status": "success", "message": "Fetched Successfully", "data": adminDetails}), 200
 
+        # If not superadmin, check for user
         user = User.query.filter_by(id=userId).first()
         if not user:
             return jsonify({"status": "error", "message": "No user found"}), 404
@@ -257,9 +283,67 @@ def get_myDetails():
         }), 500
 
 
+@superAdminBP.route('/mydetails', methods=['PUT'])
+def edit_myDetails():
+    try:
+        userId = g.user.get('userID') if g.user else None
+        if not userId:
+            return jsonify({"status": "error", "message": "Unauthorized"}), 401
+
+        data = request.get_json()
+        if not data:
+            return jsonify({"status": "error", "message": "No input data provided"}), 400
+
+        superadmin = SuperAdmin.query.filter_by(id=userId).first()
+        if not superadmin:
+            return jsonify({"status": "error", "message": "SuperAdmin not found"}), 404
+
+        # Update SuperAdmin fields
+        superadmin.companyName = data.get('companyName', superadmin.companyName)
+        superadmin.companyEmail = data.get('companyEmail', superadmin.companyEmail)
+        superadmin.company_type = data.get('company_type', superadmin.company_type)
+        superadmin.company_website = data.get('company_website', superadmin.company_website)
+        superadmin.company_years = data.get('company_years', superadmin.company_years)
+        superadmin.is_super_admin = data.get('is_super_admin', superadmin.is_super_admin)
+
+        estabilish = data.get('company_estabilish')
+        if estabilish:
+            try:
+                superadmin.company_estabilish = datetime.strptime(estabilish, '%Y-%m-%d')
+            except ValueError:
+                return jsonify({"status": "error", "message": "Invalid date format. Use YYYY-MM-DD"}), 400
+
+        panel = superadmin.superadminPanel
+        if panel and panel.adminDetail:
+            admin = panel.adminDetail
+            admin.legalName = data.get('legalName', admin.legalName)
+            admin.panNumber = data.get('panNumber', admin.panNumber)
+            admin.cinNumber = data.get('cinNumber', admin.cinNumber)
+            admin.udyamNumber = data.get('udyamNumber', admin.udyamNumber)
+            admin.gstNumber = data.get('gstNumber', admin.gstNumber)
+            admin.officialmail = data.get('officialmail', admin.officialmail)
+            admin.phoneNumber = data.get('phoneNumber', admin.phoneNumber)
+            admin.linkedin = data.get('linkedin', admin.linkedin)
+            admin.twitter = data.get('twitter', admin.twitter)
+            admin.ceo = data.get('ceo', admin.ceo)
+            admin.cto = data.get('cto', admin.cto)
+            admin.hrmanager = data.get('hrmanager', admin.hrmanager)
+
+        db.session.commit()
+        return jsonify({"status": "success", "message": "Details updated successfully"}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Internal server error",
+            "error": str(e)
+        }), 500
+
 # ====================================
 #            PUNCH SECTION            
 # ====================================
+
 
 @superAdminBP.route('/punchdetails', methods=['GET'])
 def all_punchDetails():
@@ -1634,7 +1718,6 @@ def get_announcement():
         if not superadmin:
             return jsonify({"status": "error", "message": "SuperAdmin not found"}), 404
 
-        # Get pagination params
         page = request.args.get('page', 1, type=int)
         limit = request.args.get('limit', 10, type=int)
 
@@ -1643,6 +1726,13 @@ def get_announcement():
 
         announcement_list = []
         for ann in pagination.items:
+            comment_list = [{
+                "id": c.id,
+                "empId": c.empId,
+                "comment": c.comments,
+                "created_at": c.created_at.isoformat()
+            } for c in ann.comments]
+
             announcement_list.append({
                 "id": ann.id,
                 "title": ann.title,
@@ -1652,6 +1742,8 @@ def get_announcement():
                 "scheduled_time": ann.scheduled_time.isoformat() if ann.scheduled_time else None,
                 "is_published": ann.is_published,
                 "created_at": ann.created_at.isoformat() if ann.created_at else None,
+                
+                # Poll info
                 "poll_question": ann.poll_question,
                 "poll_option_1": ann.poll_option_1,
                 "poll_option_2": ann.poll_option_2,
@@ -1661,6 +1753,9 @@ def get_announcement():
                 "votes_option_2": ann.votes_option_2,
                 "votes_option_3": ann.votes_option_3,
                 "votes_option_4": ann.votes_option_4,
+
+                "likes_count": len(ann.likes),
+                "comments": comment_list
             })
 
         return jsonify({
@@ -2768,6 +2863,7 @@ def get_employee_documents():
         }), 500
 
 
+
 # ====================================
 #      PROJECT MANAGEMENT SECTION           
 # ====================================
@@ -2821,7 +2917,7 @@ def add_Project():
                     taskPanelId=new_task.id,
                     userPanelId=user_panel.id,
                     user_emp_id=user.empId,
-                    usersName=getattr(user, 'userName', 'Unknown'),  # fallback if name not present
+                    usersName=getattr(user, 'userName', 'Unknown'),
                     image=getattr(user, 'profileImage', '')
                 )
                 db.session.add(task_user)
@@ -2844,7 +2940,6 @@ def add_Project():
             "error": str(e)
         }), 500
 
-    
 
 @superAdminBP.route('/project', methods=['GET'])
 def get_all_projects():
@@ -2897,6 +2992,41 @@ def get_all_projects():
         }), 200
 
     except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e)
+        }), 500
+
+
+@superAdminBP.route('/project/<int:task_id>', methods=['DELETE'])
+def delete_project(task_id):
+    try:
+        superadmin, err, status = get_authorized_superadmin()
+        if err:
+            return err, status
+
+        task = TaskManagement.query.filter_by(
+            id=task_id,
+            superpanelId=superadmin.superadminPanel.id
+        ).first()
+
+        if not task:
+            return jsonify({
+                "status": "error",
+                "message": "Task not found or unauthorized"
+            }), 404
+
+        db.session.delete(task)
+        db.session.commit()
+
+        return jsonify({
+            "status": "success",
+            "message": "Project and all associated comments deleted successfully"
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
         return jsonify({
             "status": "error",
             "message": "Internal Server Error",

@@ -1,4 +1,4 @@
-from models import User,UserPanelData,db,SuperAdmin,PunchData, UserTicket, UserDocument, UserChat, UserLeave, ShiftTimeManagement, Announcement, Likes, Comments
+from models import User,UserPanelData,db,SuperAdmin,PunchData, UserTicket, UserDocument, UserChat, UserLeave, ShiftTimeManagement, Announcement, Likes, Comments, Notice
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask import Blueprint, request, json, jsonify, g
 from datetime import datetime,time, timedelta
@@ -1458,7 +1458,7 @@ def get_leave_details():
 
 
 # ====================================
-#        USER POLL SECTION
+#   USER ANNOUNCE AND POLL SECTION
 # ====================================
 
 
@@ -1631,6 +1631,201 @@ def get_pole():
         }), 500
 
 
+@user.route('/announcement', methods=['GET'])
+def get_announcement():
+    try:
+        userID = g.user.get('userID') if g.user else None
+        if not userID:
+            return jsonify({
+                "status": "error",
+                "message": "No user or auth token",
+            }), 404
+
+        user = User.query.filter_by(id=userID).first()
+        if not user:
+            return jsonify({
+                "status": "error",
+                "message": "No user found",
+            }), 404
+
+        useradmin = SuperAdmin.query.filter_by(superId=user.superadminId).first()
+        if not useradmin:
+            return jsonify({
+                "status": "error",
+                "message": "Unauthorized",
+            }), 409
+
+        allAnnouncement = useradmin.superadminPanel.adminAnnouncement
+
+        result = []
+        for ann in allAnnouncement:
+            if not ann.is_published:
+                continue
+            if ann.scheduled_time and ann.scheduled_time > datetime.utcnow():
+                continue
+
+            liked_by_user = Likes.query.filter_by(
+                announcement_id=ann.id,
+                empId=userID
+            ).first() is not None
+
+            comment_list = [{
+                "id": c.id,
+                "empId": c.empId,
+                "comment": c.comments,
+                "created_at": c.created_at.isoformat()
+            } for c in ann.comments]
+
+            result.append({
+                "id": ann.id,
+                "title": ann.title,
+                "content": ann.content,
+                "images": ann.images,
+                "video": ann.video,
+                "created_at": ann.created_at.isoformat(),
+                "scheduled_time": ann.scheduled_time.isoformat() if ann.scheduled_time else None,
+                "likes_count": len(ann.likes),
+                "liked_by_user": liked_by_user,
+                "comments": comment_list,
+                "poll": {
+                    "question": ann.poll_question,
+                    "options": [
+                        {"text": ann.poll_option_1, "votes": ann.votes_option_1},
+                        {"text": ann.poll_option_2, "votes": ann.votes_option_2},
+                        {"text": ann.poll_option_3, "votes": ann.votes_option_3},
+                        {"text": ann.poll_option_4, "votes": ann.votes_option_4}
+                    ] if ann.poll_question else None
+                }
+            })
+
+        return jsonify({
+            "status": "success",
+            "announcements": result
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e)
+        }), 500
+
+
+@user.route('/announcement/<int:announcement_id>', methods=['POST'])
+def interact_with_announcement(announcement_id):
+    try:
+        userID = g.user.get('userID') if g.user else None
+        if not userID:
+            return jsonify({"status": "error", "message": "Unauthorized"}), 401
+
+        user = User.query.filter_by(id=userID).first()
+        if not user:
+            return jsonify({"status": "error", "message": "No user found"}), 404
+
+        data = request.get_json() or {}
+        like = data.get('like')
+        comment_text = data.get('comment', '').strip()
+
+        announcement = Announcement.query.get(announcement_id)
+        if not announcement:
+            return jsonify({"status": "error", "message": "Announcement not found"}), 404
+
+        response = {"status": "success", "message": []}
+
+        if like is not None:
+            existing_like = Likes.query.filter_by(announcement_id=announcement_id, empId=user.empId).first()
+            if like:
+                if not existing_like:
+                    db.session.add(Likes(announcement_id=announcement_id, empId=user.empId))
+                    response["message"].append("liked")
+                else:
+                    response["message"].append("You have already liked this.")
+            else:
+                if existing_like:
+                    db.session.delete(existing_like)
+                    response["message"].append("unliked")
+                else:
+                    response["message"].append("not_liked_yet")
+
+        if comment_text:
+            new_comment = Comments(
+                announcement_id=announcement_id,
+                empId=user.empId,
+                comments=comment_text
+            )
+            db.session.add(new_comment)
+            response["actions"].append("commented")
+
+        db.session.commit()
+
+        return jsonify(response), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e)
+        }), 500
+
+
 # ====================================
-#        USER POLL SECTION
+#        USER NOTICE SECTION
 # ====================================
+
+
+@user.route('/notice', methods=['GET'])
+def get_Notice():
+    try:
+        userID = g.user.get('userID') if g.user else None
+        if not userID:
+            return jsonify({
+                "status": "error",
+                "message": "Unauthorized",
+            }), 404
+
+        user = User.query.filter_by(id=userID).first()
+        if not user:
+            return jsonify({
+                "status": "error",
+                "message": "User not found",
+            }), 404
+
+        userAdmin = SuperAdmin.query.filter_by(superId=user.superadminId).first()
+        if not userAdmin:
+            return jsonify({
+                "status": "error",
+                "message": "Unauthorized access",
+            }), 403
+
+        # Pagination params
+        page = request.args.get('page', 1, type=int)
+        limit = request.args.get('limit', 10, type=int)
+
+        # Query notices
+        query = Notice.query.filter_by(superpanel=userAdmin.superadminPanel.id)
+        pagination = query.order_by(Notice.createdAt.desc()).paginate(page=page, per_page=limit, error_out=False)
+
+        notice_list = [{
+            "id": n.id,
+            "notice": n.notice,
+            "createdAt": n.createdAt.isoformat() if n.createdAt else None
+        } for n in pagination.items]
+
+        return jsonify({
+            "status": "success",
+            "notices": notice_list,
+            "pagination": {
+                "page": pagination.page,
+                "per_page": pagination.per_page,
+                "total_pages": pagination.pages,
+                "total_items": pagination.total
+            }
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e)
+        }), 500

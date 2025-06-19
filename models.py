@@ -24,6 +24,12 @@ class SuperAdmin(db.Model):
     companyName = db.Column(db.String(100), nullable=False)
     companyEmail = db.Column(db.String(120), nullable=False)
     company_password = db.Column(db.String(250), nullable=False)
+
+    #details
+    company_type = db.Column(db.String(250), nullable=False)
+    company_website = db.Column(db.String(250), nullable=False)
+    company_estabilish = db.Column(db.DateTime)
+    company_years = db.Column(db.Integer, nullable=False)
     is_super_admin = db.Column(db.Boolean, default=False)
     # master_id = db.Column(db.Integer, db.ForeignKey('master.id'), nullable=True)
     superadminPanel = db.relationship('SuperAdminPanel', backref='superadmin', uselist=False, lazy=True)  #superadmin panel
@@ -35,6 +41,7 @@ class SuperAdminPanel(db.Model):
     superadmin_id = db.Column(db.Integer, db.ForeignKey('superadmin.id'), nullable=False)
     allUsers = db.relationship('User', backref='superadminpanel', lazy=True)
     adminLeave = db.relationship('AdminLeave', backref='superadminpanel', lazy=True)
+    adminDetails = db.relationship('AdminDetail', backref='superadminpanel', lazy=True)
     adminDocs = db.relationship('AdminDoc', backref='superadminpanel', lazy=True)
     adminAnnouncement = db.relationship('Announcement', backref='superadminpanel', lazy=True)
     adminNotice = db.relationship('Notice', backref='superadminpanel', lazy=True)
@@ -43,6 +50,24 @@ class SuperAdminPanel(db.Model):
     adminRemotePolicy = db.relationship('RemotePolicy', backref='superadminpanel', lazy=True)
     adminPayrollPolicy = db.relationship('PayrollPolicy', backref='superadminpanel', lazy=True)
     adminTaskManagement = db.relationship('TaskManagement', backref='superadminpanel', lazy=True)
+
+
+class AdminDetail(db.Model):
+    __tablename__ = 'admindetail'
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    superpanel = db.Column(db.Integer, db.ForeignKey('superadminpanel.id'), nullable=False)
+    legalName = db.Column(db.String(250))
+    panNumber = db.Column(db.String(250))
+    cinNumber = db.Column(db.String(250))
+    udyamNumber = db.Column(db.String(250))
+    gstNumber = db.Column(db.String(250))
+    officialmail = db.Column(db.String(250))
+    phoneNumber = db.Column(db.Integer)
+    linkedin = db.Column(db.String(250))
+    twitter = db.Column(db.String(250))
+    ceo = db.Column(db.String(250))
+    cto = db.Column(db.String(250))
+    hrmanager = db.Column(db.String(250))
 
 
 class Announcement(db.Model):
@@ -78,7 +103,7 @@ class Likes(db.Model):
     __tablename__ = 'likes'
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     announcement_id = db.Column(db.Integer, db.ForeignKey('announcement.id'), nullable=False)
-    empId = db.Column(db.Integer)
+    empId = db.Column(db.String(120))
     liked_at = db.Column(db.DateTime, default=datetime.utcnow)
     __table_args__ = (db.UniqueConstraint('announcement_id', 'empId', name='unique_user_like'),)
 
