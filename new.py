@@ -1,127 +1,78 @@
-@superAdminBP.route('/project', methods=['POST'])
-def add_Project():
+@superAdminBP.route('/announcement', methods=['GET'])
+def get_announcement():
     try:
-        superadmin, err, status = get_authorized_superadmin()
-        if err:
-            return err, status
+        userID = g.user.get('userID') if g.user else None
+        if not userID:
+            return jsonify({"status": "error", "message": "No user or auth token provided"}), 404
 
-        title = request.form.get('title')
-        description = request.form.get('description')
-        lastDate = request.form.get('lastDate')
+        superadmin = SuperAdmin.query.filter_by(id=userID).first()
+        if not superadmin:
+            return jsonify({"status": "error", "message": "SuperAdmin not found"}), 404
 
-        links = request.form.getlist('links') or []
-        files = request.form.getlist('files') or []
+        allAnnouncement = superadmin.superadminPanel.adminAnnouncement
 
-        emp_ids = request.form.getlist('empIDs')
-        if not title or not lastDate:
-            return jsonify({
-                "status": "error",
-                "message": "Title and Last Date are required."
-            }), 400
+        filtered_announcements = [
+            ann for ann in allAnnouncement
+            if ann.is_published and (not ann.scheduled_time or ann.scheduled_time <= datetime.utcnow())
+        ]
 
-        try:
-            lastDate_dt = datetime.fromisoformat(lastDate)
-        except ValueError:
-            return jsonify({
-                "status": "error",
-                "message": "Invalid date format for 'lastDate'. Use YYYY-MM-DD or ISO."
-            }), 400
+        page = request.args.get('page', 1, type=int)
+        limit = request.args.get('limit', 10, type=int)
+        start = (page - 1) * limit
+        end = start + limit
+        paginated_announcements = filtered_announcements[start:end]
 
-        new_task = TaskManagement(
-            superpanelId=superadmin.superadminPanel.id,
-            title=title,
-            description=description,
-            lastDate=lastDate_dt,
-            links=links,
-            files=files
-        )
-        db.session.add(new_task)
-        db.session.flush()
+        result = []
+        for ann in paginated_announcements:
+            liked_by_user = Likes.query.filter_by(
+                announcement_id=ann.id,
+                empId=userID
+            ).first() is not None
 
-        for emp_id in emp_ids:
-            user = User.query.filter_by(empId=emp_id).first()
-            if user and user.panelData:
-                user_panel = user.panelData
-                task_user = TaskUser(
-                    taskPanelId=new_task.id,
-                    userPanelId=user_panel.id,
-                    user_emp_id=user.empId,
-                    usersName=getattr(user, 'userName', 'Unknown'),
-                    image=getattr(user, 'profileImage', '')
-                )
-                db.session.add(task_user)
-            else:
-                print(f"⚠️ No user found for emp_id: {emp_id}")
+            comment_list = [{
+                "id": c.id,
+                "empId": c.empId,
+                "comment": c.comments,
+                "created_at": c.created_at.isoformat()
+            } for c in ann.comments]
 
-        db.session.commit()
-
-        return jsonify({
-            "status": "success",
-            "message": "Project and task assignments added successfully",
-            "taskId": new_task.id
-        }), 201
-
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({
-            "status": "error",
-            "message": "Internal Server Error",
-            "error": str(e)
-        }), 500
-
-    
-
-@superAdminBP.route('/project', methods=['GET'])
-def get_all_projects():
-    try:
-        superadmin, err, status = get_authorized_superadmin()
-        if err:
-            return err, status
-
-        tasks = TaskManagement.query.filter_by(
-            superpanelId=superadmin.superadminPanel.id
-        ).order_by(TaskManagement.assignedAt.desc()).all()
-
-        task_list = []
-        for task in tasks:
-            comments = []
-            for comment in task.comments:
-                comments.append({
-                    "id": comment.id,
-                    "userId": comment.userId,
-                    "username": comment.username,
-                    "comment": comment.comments,
-                    "timestamp": comment.timestamp.isoformat() if hasattr(comment, "timestamp") and comment.timestamp else None
-                })
-
-            assigned_users = []
-            for user in task.users:
-                assigned_users.append({
-                    "userPanelId": user.userPanelId,
-                    "empId": user.user_emp_id,
-                    "userName": user.user_userName,
-                    "image": user.image,
-                    "isCompleted": user.is_completed
-                })
-
-            task_list.append({
-                "id": task.id,
-                "title": task.title,
-                "description": task.description,
-                "assignedAt": task.assignedAt.isoformat() if task.assignedAt else None,
-                "lastDate": task.lastDate.isoformat() if task.lastDate else None,
-                "links": task.links,
-                "files": task.files,
-                "comments": comments,
-                "assignedUsers": assigned_users
+            result.append({
+                "id": ann.id,
+                "title": ann.title,
+                "content": ann.content,
+                "images": ann.images,
+                "video": ann.video,
+                "is_published": ann.is_published,
+                "created_at": ann.created_at.isoformat(),
+                "scheduled_time": ann.scheduled_time.isoformat() if ann.scheduled_time else None,
+                "likes_count": len(ann.likes),
+                "liked_by_user": liked_by_user,
+                "comments": comment_list,
+                "poll": {
+                    "question": ann.poll_question,
+                    "options": [
+                        {"text": ann.poll_option_1, "votes": ann.votes_option_1},
+                        {"text": ann.poll_option_2, "votes": ann.votes_option_2},
+                        {"text": ann.poll_option_3, "votes": ann.votes_option_3},
+                        {"text": ann.poll_option_4, "votes": ann.votes_option_4}
+                    ] if ann.poll_question else None
+                }
             })
 
         return jsonify({
             "status": "success",
-            "tasks": task_list
+            "message": "Fetched published announcements",
+            "data": result,
+            "pagination": {
+                "page": page,
+                "per_page": limit,
+                "total_items": len(filtered_announcements),
+                "total_pages": (len(filtered_announcements) + limit - 1) // limit
+            }
         }), 200
 
     except Exception as e:
+        db.session.rollback()
         return jsonify({
             "status": "error",
             "message": "Internal Server Error",

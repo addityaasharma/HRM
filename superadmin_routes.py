@@ -1,4 +1,4 @@
-from models import SuperAdmin, SuperAdminPanel, db, PunchData, User, UserTicket, AdminLeave, AdminDoc, Announcement, AdminLeave, BonusPolicy, UserLeave, UserPanelData, ShiftTimeManagement, RemotePolicy, PayrollPolicy, Notice, TaskManagement, TaskUser, TaskComments
+from models import SuperAdmin, SuperAdminPanel, db, PunchData, User, UserTicket, AdminLeave, AdminDoc, Announcement, AdminLeave, BonusPolicy, UserLeave, UserPanelData, ShiftTimeManagement, RemotePolicy, PayrollPolicy, Notice, TaskManagement, TaskUser, TaskComments, AdminDetail, Likes
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask import Blueprint, request, jsonify, g
 from middleware import create_tokens
@@ -91,6 +91,10 @@ def supAdmin_signup():
             superId=super_id,
             companyName=data.get('companyName'),
             companyEmail=data.get('companyEmail'),
+            company_type=data.get('company_type'),
+            company_website=data.get('company_website'),
+            company_estabilish=data.get('company_estabilish'),
+            company_years=data.get('company_years'),
             company_password=generate_password_hash(data.get('company_password')),
             is_super_admin=data.get('is_super_admin')
         )
@@ -200,7 +204,7 @@ def get_myDetails():
         superadmin = SuperAdmin.query.filter_by(id=userId).first()
         if superadmin:
             panel = superadmin.superadminPanel
-            admin_detail = panel.adminDetail if panel else None
+            admin_detail = panel.adminDetails if panel else None
 
             adminDetails = {
                 "id": superadmin.id,
@@ -215,7 +219,7 @@ def get_myDetails():
 
             if admin_detail:
                 adminDetails.update({
-                    "legalName": admin_detail.legalName,
+                    "legalName": admin_detail.legalCompanyName,
                     "panNumber": admin_detail.panNumber,
                     "cinNumber": admin_detail.cinNumber,
                     "udyamNumber": admin_detail.udyamNumber,
@@ -226,12 +230,17 @@ def get_myDetails():
                     "twitter": admin_detail.twitter,
                     "ceo": admin_detail.ceo,
                     "cto": admin_detail.cto,
-                    "hrmanager": admin_detail.hrmanager
+                    "hrmanager": admin_detail.hrmanager,
+                    "headOffice" : admin_detail.headOffice,
+                    "state" : admin_detail.state,
+                    "zipCode" : admin_detail.zipCode,
+                    "city" : admin_detail.city,
+                    "country" : admin_detail.country,
+                    "location" : admin_detail.location,
                 })
 
             return jsonify({"status": "success", "message": "Fetched Successfully", "data": adminDetails}), 200
 
-        # If not superadmin, check for user
         user = User.query.filter_by(id=userId).first()
         if not user:
             return jsonify({"status": "error", "message": "No user found"}), 404
@@ -298,7 +307,6 @@ def edit_myDetails():
         if not superadmin:
             return jsonify({"status": "error", "message": "SuperAdmin not found"}), 404
 
-        # Update SuperAdmin fields
         superadmin.companyName = data.get('companyName', superadmin.companyName)
         superadmin.companyEmail = data.get('companyEmail', superadmin.companyEmail)
         superadmin.company_type = data.get('company_type', superadmin.company_type)
@@ -314,9 +322,9 @@ def edit_myDetails():
                 return jsonify({"status": "error", "message": "Invalid date format. Use YYYY-MM-DD"}), 400
 
         panel = superadmin.superadminPanel
-        if panel and panel.adminDetail:
-            admin = panel.adminDetail
-            admin.legalName = data.get('legalName', admin.legalName)
+        if panel and panel.adminDetails:
+            admin = panel.adminDetails
+            admin.legalCompanyName = data.get('legalName', admin.legalCompanyName)
             admin.panNumber = data.get('panNumber', admin.panNumber)
             admin.cinNumber = data.get('cinNumber', admin.cinNumber)
             admin.udyamNumber = data.get('udyamNumber', admin.udyamNumber)
@@ -328,6 +336,12 @@ def edit_myDetails():
             admin.ceo = data.get('ceo', admin.ceo)
             admin.cto = data.get('cto', admin.cto)
             admin.hrmanager = data.get('hrmanager', admin.hrmanager)
+            admin.headOffice = data.get('headOffice', admin.headOffice)
+            admin.state = data.get('state', admin.state)
+            admin.zipCode = data.get('zipCode', admin.zipCode)
+            admin.city = data.get('city', admin.city)
+            admin.country = data.get('country', admin.country)
+            admin.location = data.get('location', admin.location)
 
         db.session.commit()
         return jsonify({"status": "success", "message": "Details updated successfully"}), 200
@@ -339,6 +353,73 @@ def edit_myDetails():
             "message": "Internal server error",
             "error": str(e)
         }), 500
+
+
+@superAdminBP.route('/mydetails', methods=['POST'])
+def create_company_details():
+    try:
+        superadmin, err, status = get_authorized_superadmin()
+        if err:
+            return err, status
+
+        panel = superadmin.superadminPanel
+        if not panel:
+            return jsonify({
+                "status": "error",
+                "message": "SuperAdmin panel not found"
+            }), 404
+
+        if panel.adminDetails:
+            return jsonify({
+                "status": "error",
+                "message": "AdminDetails already exist"
+            }), 409
+
+        data = request.get_json()
+        if not data:
+            return jsonify({
+                "status": "error",
+                "message": "No input data provided"
+            }), 400
+
+        details = AdminDetail(
+            superpanel=panel.id,
+            legalCompanyName=data.get('legalName'),
+            panNumber=data.get('panNumber'),
+            cinNumber=data.get('cinNumber'),
+            udyamNumber=data.get('udyamNumber'),
+            gstNumber=data.get('gstNumber'),
+            officialmail=data.get('officialmail'),
+            phoneNumber=data.get('phoneNumber'),
+            linkedin=data.get('linkedin'),
+            twitter=data.get('twitter'),
+            ceo=data.get('ceo'),
+            cto=data.get('cto'),
+            hrmanager=data.get('hrmanager'),
+            headOffice = data.get('headOffice'),
+            state = data.get('state'),
+            zipCode = data.get('zipCode'),
+            city = data.get('city'),
+            country = data.get('country'),
+            location = data.get('location'),
+        )
+
+        db.session.add(details)
+        db.session.commit()
+
+        return jsonify({
+            "status": "success",
+            "message": "AdminDetails created successfully"
+        }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e),
+        }), 500
+
 
 # ====================================
 #            PUNCH SECTION            
@@ -539,6 +620,7 @@ def all_users_or_one(id):
                 'city': user.city,
                 'state': user.state,
                 'country': user.country,
+                'birthday': user.birthday,
                 'nationality': user.nationality,
                 'panNumber': user.panNumber,
                 'adharNumber': user.adharNumber,
@@ -596,6 +678,7 @@ def all_users_or_one(id):
                 'postal': user.postal,
                 'city': user.city,
                 'state': user.state,
+                'birthday': user.birthday,
                 'country': user.country,
                 'nationality': user.nationality,
                 'panNumber': user.panNumber,
@@ -680,13 +763,13 @@ def edit_user(userId):
             'uanNumber', 'department', 'onBoardingStatus', 'sourceOfHire',
             'currentSalary', 'joiningDate', 'schoolName', 'degree',
             'fieldOfStudy', 'dateOfCompletion', 'skills', 'occupation',
-            'company', 'experience', 'duration', 'shift'
+            'company', 'experience', 'duration', 'shift', 'birthday'
         ]
 
         # Field type groups
         integer_fields = ['currentSalary', 'experience']
         date_fields = ['dateOfCompletion']
-        datetime_fields = ['joiningDate']
+        datetime_fields = ['joiningDate','birthday']
         string_fields = [
             'profileImage', 'userName', 'gender', 'number', 'currentAddress', 
             'permanentAddress', 'postal', 'city', 'state', 'country', 'nationality',
@@ -1605,7 +1688,21 @@ def create_announcement():
         content = request.form.get('content')
         scheduled_time = request.form.get('scheduled_time')
         poll_question = request.form.get('poll_question')
-        poll_options = request.form.getlist('poll_options')
+
+        poll_options_raw = request.form.get('poll_options')
+        if poll_options_raw:
+            try:
+                import json
+                poll_options = json.loads(poll_options_raw)
+                if not isinstance(poll_options, list):
+                    raise ValueError
+            except Exception:
+                return jsonify({
+                    "status": "error",
+                    "message": "Invalid poll_options format. Must be a JSON array like [\"A\", \"B\"]"
+                }), 400
+        else:
+            poll_options = []
 
         if not title:
             return jsonify({"status": "error", "message": "Title is required"}), 400
@@ -1718,14 +1815,21 @@ def get_announcement():
         if not superadmin:
             return jsonify({"status": "error", "message": "SuperAdmin not found"}), 404
 
-        page = request.args.get('page', 1, type=int)
-        limit = request.args.get('limit', 10, type=int)
+        allAnnouncement = superadmin.superadminPanel.adminAnnouncement
 
-        query = Announcement.query.filter_by(adminPanelId=superadmin.superadminPanel.id)
-        pagination = query.order_by(Announcement.created_at.desc()).paginate(page=page, per_page=limit, error_out=False)
+        filtered_announcements = sorted(
+            [ann for ann in allAnnouncement if ann.is_published and (not ann.scheduled_time or ann.scheduled_time <= datetime.utcnow())],
+            key=lambda x: x.created_at,
+            reverse=True
+        )
 
-        announcement_list = []
-        for ann in pagination.items:
+        result = []
+        for ann in filtered_announcements:
+            liked_by_user = Likes.query.filter_by(
+                announcement_id=ann.id,
+                empId=userID
+            ).first() is not None
+
             comment_list = [{
                 "id": c.id,
                 "empId": c.empId,
@@ -1733,41 +1837,33 @@ def get_announcement():
                 "created_at": c.created_at.isoformat()
             } for c in ann.comments]
 
-            announcement_list.append({
+            result.append({
                 "id": ann.id,
                 "title": ann.title,
                 "content": ann.content,
                 "images": ann.images,
                 "video": ann.video,
-                "scheduled_time": ann.scheduled_time.isoformat() if ann.scheduled_time else None,
                 "is_published": ann.is_published,
-                "created_at": ann.created_at.isoformat() if ann.created_at else None,
-                
-                # Poll info
-                "poll_question": ann.poll_question,
-                "poll_option_1": ann.poll_option_1,
-                "poll_option_2": ann.poll_option_2,
-                "poll_option_3": ann.poll_option_3,
-                "poll_option_4": ann.poll_option_4,
-                "votes_option_1": ann.votes_option_1,
-                "votes_option_2": ann.votes_option_2,
-                "votes_option_3": ann.votes_option_3,
-                "votes_option_4": ann.votes_option_4,
-
+                "created_at": ann.created_at.isoformat(),
+                "scheduled_time": ann.scheduled_time.isoformat() if ann.scheduled_time else None,
                 "likes_count": len(ann.likes),
-                "comments": comment_list
+                "liked_by_user": liked_by_user,
+                "comments": comment_list,
+                "poll": {
+                    "question": ann.poll_question,
+                    "options": [
+                        {"text": ann.poll_option_1, "votes": ann.votes_option_1},
+                        {"text": ann.poll_option_2, "votes": ann.votes_option_2},
+                        {"text": ann.poll_option_3, "votes": ann.votes_option_3},
+                        {"text": ann.poll_option_4, "votes": ann.votes_option_4}
+                    ] if ann.poll_question else None
+                }
             })
 
         return jsonify({
             "status": "success",
-            "message": "Fetched successfully",
-            "data": announcement_list,
-            "pagination": {
-                "page": pagination.page,
-                "per_page": pagination.per_page,
-                "total_pages": pagination.pages,
-                "total_items": pagination.total
-            }
+            "message": "Fetched published announcements",
+            "data": result
         }), 200
 
     except Exception as e:
@@ -2722,7 +2818,6 @@ def get_notices():
         if err:
             return err, status
 
-        # Get pagination parameters from query string
         page = int(request.args.get('page', 1))
         limit = int(request.args.get('limit', 10))
         offset = (page - 1) * limit
@@ -3031,4 +3126,68 @@ def delete_project(task_id):
             "status": "error",
             "message": "Internal Server Error",
             "error": str(e)
+        }), 500
+
+
+# ====================================
+#      CELEBRATION SECTION           
+# ====================================
+
+
+@superAdminBP.route('/celebration', methods=['GET'])
+def get_upcoming_birthdays():
+    try:
+        userId = g.user.get('userID') if g.user else None
+        if not userId:
+            return jsonify({
+                "status": "error",
+                "message": "Unauthorized",
+            }), 400
+        
+        superadmin = SuperAdmin.query.filter_by(id=userId).first()
+        if not superadmin:
+            user = User.query.filter_by(id=userId).first()
+            if not user:
+                return jsonify({
+                    "status": "error",
+                    "message": "Unauthorized"
+                }), 404
+            superadmin = SuperAdmin.query.filter_by(superId=user.superadminId).first()
+
+        allusers = superadmin.superadminPanel.allUsers
+        if not allusers:
+            return jsonify({
+                "status": "error",
+                "message": "No users yet"
+            }), 404
+
+        today = datetime.today()
+        upcoming_birthdays = []
+
+        for u in allusers:
+            if u.birthday:
+                birthday_this_year = u.birthday.replace(year=today.year)
+                if birthday_this_year >= today:
+                    upcoming_birthdays.append({
+                        "id": u.id,
+                        "userName": u.userName,
+                        "birthday": u.birthday.strftime('%Y-%m-%d'),
+                        "profileImage": u.profileImage,
+                    })
+
+        # Sort by nearest birthday
+        upcoming_birthdays.sort(key=lambda x: datetime.strptime(x["birthday"], '%Y-%m-%d').replace(year=today.year))
+
+        return jsonify({
+            "status": "success",
+            "message": "Fetched upcoming birthdays",
+            "data": upcoming_birthdays
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e),
         }), 500

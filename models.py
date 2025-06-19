@@ -26,11 +26,11 @@ class SuperAdmin(db.Model):
     company_password = db.Column(db.String(250), nullable=False)
 
     #details
-    company_type = db.Column(db.String(250), nullable=False)
-    company_website = db.Column(db.String(250), nullable=False)
+    company_type = db.Column(db.String(250))
+    company_website = db.Column(db.String(250))
     company_estabilish = db.Column(db.DateTime)
-    company_years = db.Column(db.Integer, nullable=False)
-    is_super_admin = db.Column(db.Boolean, default=False)
+    company_years = db.Column(db.Integer)
+    is_super_admin = db.Column(db.Boolean)
     # master_id = db.Column(db.Integer, db.ForeignKey('master.id'), nullable=True)
     superadminPanel = db.relationship('SuperAdminPanel', backref='superadmin', uselist=False, lazy=True)  #superadmin panel
 
@@ -41,7 +41,7 @@ class SuperAdminPanel(db.Model):
     superadmin_id = db.Column(db.Integer, db.ForeignKey('superadmin.id'), nullable=False)
     allUsers = db.relationship('User', backref='superadminpanel', lazy=True)
     adminLeave = db.relationship('AdminLeave', backref='superadminpanel', lazy=True)
-    adminDetails = db.relationship('AdminDetail', backref='superadminpanel', lazy=True)
+    adminDetails = db.relationship('AdminDetail', backref='superadminpanel',uselist=False, lazy=True)
     adminDocs = db.relationship('AdminDoc', backref='superadminpanel', lazy=True)
     adminAnnouncement = db.relationship('Announcement', backref='superadminpanel', lazy=True)
     adminNotice = db.relationship('Notice', backref='superadminpanel', lazy=True)
@@ -56,7 +56,7 @@ class AdminDetail(db.Model):
     __tablename__ = 'admindetail'
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     superpanel = db.Column(db.Integer, db.ForeignKey('superadminpanel.id'), nullable=False)
-    legalName = db.Column(db.String(250))
+    legalCompanyName = db.Column(db.String(250))
     panNumber = db.Column(db.String(250))
     cinNumber = db.Column(db.String(250))
     udyamNumber = db.Column(db.String(250))
@@ -68,6 +68,12 @@ class AdminDetail(db.Model):
     ceo = db.Column(db.String(250))
     cto = db.Column(db.String(250))
     hrmanager = db.Column(db.String(250))
+    headOffice = db.Column(db.String(120))
+    state = db.Column(db.String(255))
+    zipCode = db.Column(db.String(255))
+    city = db.Column(db.String(255))
+    country = db.Column(db.String(120))
+    location = db.Column(db.String(120))
 
 
 class Announcement(db.Model):
@@ -262,6 +268,7 @@ class User(db.Model):
     number = db.Column(db.String(20))
     currentAddress = db.Column(db.String(200))
     permanentAddress = db.Column(db.String(200))
+    birthday = db.Column(db.DateTime)
     postal = db.Column(db.String(20))
     city = db.Column(db.String(120))
     state = db.Column(db.String(120))

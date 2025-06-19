@@ -569,26 +569,25 @@ def edit_Profile():
                 'message': 'User not found.'
             }), 404
 
-        data = request.get_json()
-        if not data:
-            return jsonify({
-                'status': 'error',
-                'message': 'No data provided.'
-            }), 400
+        data = request.form.to_dict()
+        file = request.files.get('profileImage')
 
         updatable_fields = [
-            'profileImage', 'userName', 'gender', 'number',
-            'currentAddress', 'permanentAddress', 'postal', 'city',
-            'state', 'country', 'nationality', 'panNumber',
+            'userName', 'gender', 'number', 'currentAddress', 'permanentAddress',
+            'postal', 'city', 'state', 'country', 'nationality', 'panNumber',
             'adharNumber', 'uanNumber', 'department', 'onBoardingStatus',
             'sourceOfHire', 'currentSalary', 'joiningDate', 'schoolName',
             'degree', 'fieldOfStudy', 'dateOfCompletion', 'skills',
-            'occupation', 'company', 'experience', 'duration',
+            'occupation', 'company', 'experience', 'duration', 'birthday'
         ]
+
+        if file:
+            upload_result = cloudinary.uploader.upload(file, folder="user_profiles")
+            user.profileImage = upload_result.get("secure_url")
 
         for field in updatable_fields:
             if field in data:
-                if field == 'joiningDate' or field == 'dateOfCompletion':
+                if field in ['joiningDate', 'dateOfCompletion', 'birthday']:
                     try:
                         setattr(user, field, datetime.strptime(data[field], '%Y-%m-%d').date())
                     except ValueError:
@@ -750,6 +749,7 @@ def get_ticket():
 # ====================================
 #        USER DOCUMENTS SECTION
 # ====================================
+
 
 @user.route('/documents', methods=['POST'])
 def upload_documents():
@@ -1462,7 +1462,7 @@ def get_leave_details():
 # ====================================
 
 
-@user.route('/pole', methods=['POST'])
+@user.route('/poll', methods=['POST'])
 def check_pole():
     try:
         userID = g.user.get('userID') if g.user else None
@@ -1482,13 +1482,11 @@ def check_pole():
         data = request.get_json()
         announcement_id = data.get('announcement_id')
         selected_option = data.get('selected_option')
-        like = data.get('like')
-        comment_text = data.get('comment')
 
-        if not announcement_id:
+        if not announcement_id or selected_option is None:
             return jsonify({
                 "status": "error",
-                "message": "Announcement ID is required",
+                "message": "Announcement ID and selected_option are required",
             }), 400
 
         announcement = Announcement.query.filter_by(id=announcement_id).first()
@@ -1498,38 +1496,25 @@ def check_pole():
                 "message": "Announcement not found",
             }), 404
 
-        if selected_option in [1, 2, 3, 4]:
-            if selected_option == 1:
-                announcement.votes_option_1 += 1
-            elif selected_option == 2:
-                announcement.votes_option_2 += 1
-            elif selected_option == 3:
-                announcement.votes_option_3 += 1
-            elif selected_option == 4:
-                announcement.votes_option_4 += 1
-
-        if like:
-            existing_like = Likes.query.filter_by(announcement_id=announcement_id, empId=user.empId).first()
-            if not existing_like:
-                new_like = Likes(
-                    announcement_id=announcement_id,
-                    empId=user.empId
-                )
-                db.session.add(new_like)
-
-        if comment_text:
-            new_comment = Comments(
-                announcement_id=announcement_id,
-                empId=user.empId,
-                comments=comment_text
-            )
-            db.session.add(new_comment)
+        if selected_option == 1 and announcement.poll_option_1:
+            announcement.votes_option_1 += 1
+        elif selected_option == 2 and announcement.poll_option_2:
+            announcement.votes_option_2 += 1
+        elif selected_option == 3 and announcement.poll_option_3:
+            announcement.votes_option_3 += 1
+        elif selected_option == 4 and announcement.poll_option_4:
+            announcement.votes_option_4 += 1
+        else:
+            return jsonify({
+                "status": "error",
+                "message": "Selected option is invalid or not available",
+            }), 400
 
         db.session.commit()
 
         return jsonify({
             "status": "success",
-            "message": "Your action was recorded successfully"
+            "message": "Your vote was recorded successfully"
         }), 200
 
     except Exception as e:
@@ -1538,96 +1523,6 @@ def check_pole():
             "status": "error",
             "message": "Internal Server Error",
             "error": str(e)
-        }), 500
-
-
-@user.route('/pole', methods=['GET'])
-def get_pole():
-    try:
-        userID = g.user.get('userID') if g.user else None
-        if not userID:
-            return jsonify({
-                "status": "error",
-                "message": "No user or auth token"
-            }), 404
-
-        user = User.query.filter_by(id=userID).first()
-        if not user:
-            return jsonify({
-                "status": "error",
-                "message": "No user found",
-            }), 404
-
-        useradmin = SuperAdmin.query.filter_by(superId=user.superadminId).first()
-        if not useradmin:
-            return jsonify({
-                "status": "error",
-                "message": "Invalid user",
-            }), 404
-
-        # Pagination params
-        page = int(request.args.get('page', 1))
-        limit = int(request.args.get('limit', 10))
-        offset = (page - 1) * limit
-
-        # Filter only poll announcements and sort by latest
-        query = Announcement.query.filter(
-            Announcement.adminPanelId == useradmin.superadminPanel.id,
-            Announcement.poll_question.isnot(None)
-        ).order_by(Announcement.created_at.desc())
-
-        total = query.count()
-        announcements = query.offset(offset).limit(limit).all()
-
-        poll_announcements = []
-        for ann in announcements:
-            poll_announcements.append({
-                "id": ann.id,
-                "title": ann.title,
-                "content": ann.content,
-                "poll_question": ann.poll_question,
-                "poll_options": [
-                    ann.poll_option_1,
-                    ann.poll_option_2,
-                    ann.poll_option_3,
-                    ann.poll_option_4
-                ],
-                "votes": {
-                    "option_1": ann.votes_option_1,
-                    "option_2": ann.votes_option_2,
-                    "option_3": ann.votes_option_3,
-                    "option_4": ann.votes_option_4,
-                },
-                "likes": len(ann.likes),
-                "comments": [
-                    {
-                        "user": comment.empId,  # Replace with user name if available
-                        "text": comment.comments,
-                        "created_at": comment.created_at.strftime("%Y-%m-%d %H:%M")
-                    }
-                    for comment in ann.comments
-                ],
-                "created_at": ann.created_at.strftime("%Y-%m-%d %H:%M"),
-            })
-
-        return jsonify({
-            "status": "success",
-            "message": "Poll announcements fetched",
-            "data": poll_announcements,
-            "pagination": {
-                "current_page": page,
-                "limit": limit,
-                "total_records": total,
-                "total_pages": (total + limit - 1) // limit
-            }
-        }), 200
-
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({
-            "status": "error",
-            "message": "Internal Server Error",
-            "error": str(e),
         }), 500
 
 
@@ -1682,6 +1577,7 @@ def get_announcement():
                 "content": ann.content,
                 "images": ann.images,
                 "video": ann.video,
+                "is_published": ann.is_published,
                 "created_at": ann.created_at.isoformat(),
                 "scheduled_time": ann.scheduled_time.isoformat() if ann.scheduled_time else None,
                 "likes_count": len(ann.likes),
@@ -1798,11 +1694,9 @@ def get_Notice():
                 "message": "Unauthorized access",
             }), 403
 
-        # Pagination params
         page = request.args.get('page', 1, type=int)
         limit = request.args.get('limit', 10, type=int)
 
-        # Query notices
         query = Notice.query.filter_by(superpanel=userAdmin.superadminPanel.id)
         pagination = query.order_by(Notice.createdAt.desc()).paginate(page=page, per_page=limit, error_out=False)
 
