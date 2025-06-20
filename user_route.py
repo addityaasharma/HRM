@@ -497,6 +497,15 @@ def get_Profile():
                 "message": "No user found"
             }), 404
 
+        access_permissions = [
+            {
+                'section': access.section,
+                'permission': access.permission,
+                'allowed': access.allowed
+            }
+            for access in user.access_permissions
+        ]
+
         userDetails = {
             'id': user.id,
             'profileImage': user.profileImage,
@@ -534,7 +543,8 @@ def get_Profile():
             'userRole': user.userRole,
             'managerId': user.managerId,
             'superadmin_panel_id': user.superadmin_panel_id,
-            'created_at': user.created_at.strftime("%Y-%m-%d %H:%M:%S") if user.created_at else None
+            'created_at': user.created_at.strftime("%Y-%m-%d %H:%M:%S") if user.created_at else None,
+            'access': access_permissions
         }
 
         return jsonify({
@@ -550,6 +560,7 @@ def get_Profile():
             "message": "Internal Server Error",
             "error": str(e)
         }), 500
+
 
 
 @user.route('/profile', methods=['PUT'])

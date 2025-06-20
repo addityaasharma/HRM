@@ -636,12 +636,79 @@ def all_users_or_one(id):
 
         all_users_query = superadminpanel.allUsers
 
+        def get_user_access_list(user):
+            return [{
+                'section': access.section,
+                'permission': access.permission,
+                'allowed': access.allowed
+            } for access in user.access_permissions]
+
         if id != 0:
             single_user = next((u for u in all_users_query if u.id == id), None)
             if not single_user:
                 return jsonify({'status': 'error', 'message': 'User not found'}), 404
 
             user_data = {
+                'id': single_user.id,
+                'profileImage': single_user.profileImage,
+                'superadminId': single_user.superadminId,
+                'userName': single_user.userName,
+                'empId': single_user.empId,
+                'email': single_user.email,
+                'gender': single_user.gender,
+                'number': single_user.number,
+                'currentAddress': single_user.currentAddress,
+                'permanentAddress': single_user.permanentAddress,
+                'postal': single_user.postal,
+                'city': single_user.city,
+                'state': single_user.state,
+                'country': single_user.country,
+                'birthday': single_user.birthday,
+                'nationality': single_user.nationality,
+                'panNumber': single_user.panNumber,
+                'adharNumber': single_user.adharNumber,
+                'uanNumber': single_user.uanNumber,
+                'department': single_user.department,
+                'onBoardingStatus': single_user.onBoardingStatus,
+                'sourceOfHire': single_user.sourceOfHire,
+                'currentSalary': single_user.currentSalary,
+                'joiningDate': single_user.joiningDate.strftime("%Y-%m-%d") if single_user.joiningDate else None,
+                'schoolName': single_user.schoolName,
+                'degree': single_user.degree,
+                'fieldOfStudy': single_user.fieldOfStudy,
+                'dateOfCompletion': single_user.dateOfCompletion.strftime("%Y-%m-%d") if single_user.dateOfCompletion else None,
+                'skills': single_user.skills,
+                'shift': single_user.shift,
+                'occupation': single_user.occupation,
+                'company': single_user.company,
+                'experience': single_user.experience,
+                'duration': single_user.duration,
+                'userRole': single_user.userRole,
+                'managerId': single_user.managerId,
+                'superadmin_panel_id': single_user.superadmin_panel_id,
+                'created_at': single_user.created_at.strftime("%Y-%m-%d %H:%M:%S") if single_user.created_at else None,
+                'access': get_user_access_list(single_user)
+            }
+
+            return jsonify({'status': 'success', 'user': user_data}), 200
+
+        department = request.args.get('department')
+        if department:
+            all_users_query = [user for user in all_users_query if user.department and user.department.lower() == department.lower()]
+
+        search_query = request.args.get('query')
+        if search_query:
+            all_users_query = [user for user in all_users_query if search_query.lower() in user.userName.lower()]
+
+        page = int(request.args.get('page', 1))
+        limit = int(request.args.get('limit', 10))
+        start = (page - 1) * limit
+        end = start + limit
+        total_users = len(all_users_query)
+        paginated_users = all_users_query[start:end]
+
+        user_list = [
+            {
                 'id': user.id,
                 'profileImage': user.profileImage,
                 'superadminId': user.superadminId,
@@ -679,65 +746,8 @@ def all_users_or_one(id):
                 'userRole': user.userRole,
                 'managerId': user.managerId,
                 'superadmin_panel_id': user.superadmin_panel_id,
-                'created_at': user.created_at.strftime("%Y-%m-%d %H:%M:%S") if user.created_at else None
-            }
-
-            return jsonify({'status': 'success', 'user': user_data}), 200
-
-        department = request.args.get('department')
-        if department:
-            all_users_query = [user for user in all_users_query if user.department and user.department.lower() == department.lower()]
-
-        search_query = request.args.get('query')
-        if search_query:
-            all_users_query = [user for user in all_users_query if search_query.lower() in user.userName.lower()]
-
-        page = int(request.args.get('page', 1))
-        limit = int(request.args.get('limit', 10))
-        start = (page - 1) * limit
-        end = start + limit
-        total_users = len(all_users_query)
-        paginated_users = all_users_query[start:end]
-
-        user_list = [
-            {
-                'id': user.id,
-                'profileImage': user.profileImage,
-                'superadminId': user.superadminId,
-                'userName': user.userName,
-                'empId': user.empId,
-                'email': user.email,
-                'gender': user.gender,
-                'number': user.number,
-                'currentAddress': user.currentAddress,
-                'permanentAddress': user.permanentAddress,
-                'postal': user.postal,
-                'city': user.city,
-                'state': user.state,
-                'birthday': user.birthday,
-                'country': user.country,
-                'nationality': user.nationality,
-                'panNumber': user.panNumber,
-                'adharNumber': user.adharNumber,
-                'uanNumber': user.uanNumber,
-                'department': user.department,
-                'onBoardingStatus': user.onBoardingStatus,
-                'sourceOfHire': user.sourceOfHire,
-                'currentSalary': user.currentSalary,
-                'joiningDate': user.joiningDate.strftime("%Y-%m-%d") if user.joiningDate else None,
-                'schoolName': user.schoolName,
-                'degree': user.degree,
-                'fieldOfStudy': user.fieldOfStudy,
-                'dateOfCompletion': user.dateOfCompletion.strftime("%Y-%m-%d") if user.dateOfCompletion else None,
-                'skills': user.skills,
-                'occupation': user.occupation,
-                'company': user.company,
-                'experience': user.experience,
-                'duration': user.duration,
-                'userRole': user.userRole,
-                'managerId': user.managerId,
-                'superadmin_panel_id': user.superadmin_panel_id,
-                'created_at': user.created_at.strftime("%Y-%m-%d %H:%M:%S") if user.created_at else None
+                'created_at': user.created_at.strftime("%Y-%m-%d %H:%M:%S") if user.created_at else None,
+                'access': get_user_access_list(user)
             }
             for user in paginated_users
         ]
