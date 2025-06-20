@@ -1,4 +1,4 @@
-from models import SuperAdmin, SuperAdminPanel, db, PunchData, User, UserTicket, AdminLeave, AdminDoc, Announcement, AdminLeave, BonusPolicy, UserLeave, UserPanelData, ShiftTimeManagement, RemotePolicy, PayrollPolicy, Notice, TaskManagement, TaskUser, TaskComments, AdminDetail, Likes
+from models import SuperAdmin, SuperAdminPanel, db, PunchData, User, UserTicket, AdminLeave, AdminDoc, Announcement, AdminLeave, BonusPolicy, UserLeave, UserPanelData, ShiftTimeManagement, RemotePolicy, PayrollPolicy, Notice, TaskManagement, TaskUser, TaskComments, AdminDetail, Likes, AdminHoliday, ProductAsset
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask import Blueprint, request, jsonify, g
 from middleware import create_tokens
@@ -11,7 +11,7 @@ from datetime import datetime
 import random
 import string
 import re, json
-import math
+import math, holidays
 
 
 superAdminBP = Blueprint('superadmin',__name__, url_prefix='/superadmin')
@@ -3190,4 +3190,275 @@ def get_upcoming_birthdays():
             "status": "error",
             "message": "Internal Server Error",
             "error": str(e),
+        }), 500
+
+
+# ====================================
+#        HOLIDAY SECTION           
+# ====================================
+
+@superAdminBP.route('/holiday', methods=['POST'])
+def add_holidays():
+    try:
+        superadmin, err, status = get_authorized_superadmin()
+        if err:
+            return err, status
+
+        current_year = date.today().year
+        country = request.json.get('country', 'IN') 
+        superpanel_id = superadmin.superadminPanel.id
+
+        existing = AdminHoliday.query.filter_by(
+            superpanel=superpanel_id,
+            year=current_year,
+            country=country
+        ).first()
+
+        if existing:
+            return jsonify({
+                "status": "exists",
+                "message": f"Holidays already added for {current_year} and superadmin."
+            }), 200
+
+        generated = holidays.CountryHoliday(country, years=current_year)
+
+        new_holidays = []
+        for holiday_date, name in generated.items():
+            new_holidays.append(AdminHoliday(
+                superpanel=superpanel_id,
+                date=holiday_date,
+                name=name,
+                country=country,
+                year=current_year
+            ))
+
+        db.session.bulk_save_objects(new_holidays)
+        db.session.commit()
+
+        return jsonify({
+            "status": "success",
+            "message": f"{len(new_holidays)} holidays added for {country} in {current_year}"
+        }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e),
+        }), 500
+    
+
+@superAdminBP.route('/holiday', methods=['GET'])
+def get_holiday():
+    try:
+        userId = g.user.get('userID') if g.user else None
+        if not userId:
+            return jsonify({
+                "status": "error",
+                "message": "Unauthorized",
+            }), 401
+
+        superadmin = SuperAdmin.query.filter_by(id=userId).first()
+
+        if not superadmin:
+            user = User.query.filter_by(id=userId).first()
+            if not user or not user.superadminId:
+                return jsonify({
+                    "status": "error",
+                    "message": "Unauthorized"
+                }), 401
+            superadmin = SuperAdmin.query.filter_by(id=user.superadminId).first()
+
+        if not superadmin or not superadmin.superadminPanel:
+            return jsonify({
+                "status": "error",
+                "message": "Superadmin panel not found"
+            }), 404
+
+        holidays = superadmin.superadminPanel.adminHolidays
+
+        today = date.today()
+
+        future_holidays = [h for h in holidays if h.date >= today]
+        past_holidays = [h for h in holidays if h.date < today]
+
+        sorted_holidays = sorted(future_holidays, key=lambda x: x.date) + \
+                          sorted(past_holidays, key=lambda x: x.date, reverse=True)
+
+        result = [{
+            "id": h.id,
+            "date": h.date.isoformat(),
+            "name": h.name,
+            "country": h.country,
+            "year": h.year
+        } for h in sorted_holidays]
+
+        return jsonify({
+            "status": "success",
+            "total": len(result),
+            "holidays": result
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e),
+        }), 500
+    
+
+# ====================================
+#        DEPARTMENT SECTION           
+# ====================================
+
+@superAdminBP.route('/department', methods=['GET'])
+def get_by_department():
+    try:
+        superadmin, err, status = get_authorized_superadmin()
+        if err:
+            return err, status
+
+        filter_department = request.args.get('department')
+
+        users = superadmin.superadminPanel.allUsers
+        if not users:
+            return jsonify({
+                "status": "error",
+                "message": "No users yet."
+            }), 400
+
+        if filter_department:
+            users = [u for u in users if u.department == filter_department]
+
+        result = [{
+            "name": u.userName,
+            "profileImage": u.profileImage
+        } for u in users]
+
+        return jsonify({
+            "status": "success",
+            "total": len(result),
+            "users": result
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e)
+        }), 500
+
+
+# ====================================
+#        ASSETS SECTION           
+# ====================================
+
+@superAdminBP.route('/assets', methods=['GET'])
+def get_userAssets():
+    try:
+        superadmin, err, status = get_authorized_superadmin()
+        if err:
+            return err, status
+
+        page = request.args.get('page', 1, type=int)
+        limit = request.args.get('limit', 10, type=int)
+        status_filter = request.args.get('status')
+
+        all_assets = []
+        for user in superadmin.superadminPanel.allUsers:
+            if user.panelData and hasattr(user.panelData, 'MyAssets'):
+                for asset in user.panelData.MyAssets:
+                    all_assets.append(asset)
+
+        if status_filter:
+            all_assets = [a for a in all_assets if a.status == status_filter]
+
+        total = len(all_assets)
+
+        start = (page - 1) * limit
+        end = start + limit
+        paginated_assets = all_assets[start:end]
+
+        result = []
+        for asset in paginated_assets:
+            result.append({
+                "id": asset.id,
+                "productId": asset.productId,
+                "productName": asset.productName,
+                "category": asset.category,
+                "qty": asset.qty,
+                "dateofrequest": asset.dateofrequest.strftime('%Y-%m-%d %H:%M:%S'),
+                "department": asset.department,
+                "purchaseDate": asset.purchaseDate.strftime('%Y-%m-%d'),
+                "warrantyTill": asset.warrantyTill.strftime('%Y-%m-%d') if asset.warrantyTill else None,
+                "condition": asset.condition,
+                "status": asset.status,
+                "location": asset.location,
+                "assignedTo": asset.assignedTo
+            })
+
+        return jsonify({
+            "status": "success",
+            "data": result,
+            "page": page,
+            "total_pages": (total + limit - 1) // limit,
+            "total_assets": total
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e)
+        }), 500
+
+
+@superAdminBP.route('/assets/<int:asset_id>/status', methods=['PUT'])
+def update_asset_status(asset_id):
+    try:
+        superadmin, err, status = get_authorized_superadmin()
+        if err:
+            return err, status
+
+        data = request.get_json()
+        new_status = data.get('status')
+
+        if not new_status:
+            return jsonify({
+                "status": "error",
+                "message": "Missing 'status' in request body"
+            }), 400
+
+        asset = ProductAsset.query.get(asset_id)
+
+        if not asset:
+            return jsonify({
+                "status": "error",
+                "message": "Asset not found"
+            }), 404
+
+        asset_owner = User.query.filter_by(id=asset.assignedTo).first()
+        if not asset_owner or asset_owner not in superadmin.superadminPanel.allUsers:
+            return jsonify({
+                "status": "error",
+                "message": "Unauthorized to update this asset"
+            }), 403
+
+        asset.status = new_status
+        db.session.commit()
+
+        return jsonify({
+            "status": "success",
+            "message": "Asset status updated successfully"
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e)
         }), 500

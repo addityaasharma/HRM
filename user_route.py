@@ -1,4 +1,4 @@
-from models import User,UserPanelData,db,SuperAdmin,PunchData, UserTicket, UserDocument, UserChat, UserLeave, ShiftTimeManagement, Announcement, Likes, Comments, Notice
+from models import User,UserPanelData,db,SuperAdmin,PunchData, UserTicket, UserDocument, UserChat, UserLeave, ShiftTimeManagement, Announcement, Likes, Comments, Notice, ProductAsset
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask import Blueprint, request, json, jsonify, g
 from datetime import datetime,time, timedelta
@@ -1715,6 +1715,140 @@ def get_Notice():
                 "total_pages": pagination.pages,
                 "total_items": pagination.total
             }
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e)
+        }), 500
+
+
+# ====================================
+#        USER ASSETS SECTION
+# ====================================
+
+@user.route('/assets', methods=['POST'])
+def request_assets():
+    try:
+        userId = g.user.get('userID') if g.user else None
+        if not userId:
+            return jsonify({
+                "status": "error",
+                "message": "Unauthorized",
+            }), 404
+
+        user = User.query.filter_by(id=userId).first()
+        if not user:
+            return jsonify({
+                "status": "error",
+                "message": "Unauthorized",
+            }), 404
+
+        data = request.get_json()
+        required_fields = [ 'productName', 'qty', 'dateofrequest']
+
+        for field in required_fields:
+            if field not in data:
+                return jsonify({
+                    "status": "error",
+                    "message": f"Missing required field: {field}"
+                }), 400
+
+        asset = ProductAsset(
+            superpanel=user.panelData.id,
+            productId=data['productId'],
+            productName=data['productName'],
+            category=data['category'],
+            qty=data.get('qty', 1),
+            department=user.department,
+            purchaseDate=datetime.strptime(data['purchaseDate'], '%Y-%m-%d'),
+            dateofrequest=datetime.strptime(data['dateofrequest'], '%Y-%m-%d'),
+            warrantyTill=datetime.strptime(data['warrantyTill'], '%Y-%m-%d') if data.get('warrantyTill') else None,
+            condition=data['condition'],
+            status='pending',
+            location=data['location'],
+            assignedTo=str(user.empId)
+        )
+
+        db.session.add(asset)
+        db.session.commit()
+
+        return jsonify({
+            "status": "success",
+            "message": "Asset request submitted successfully",
+            "data": {
+                "asset_id": asset.id
+            }
+        }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e),
+        }), 500
+
+
+@user.route('/assets', methods=['GET'])
+def get_assets():
+    try:
+        userId = g.user.get('userId') if g.user else None
+        if not userId:
+            return jsonify({
+                "status": "error",
+                "message": "Unauthorized"
+            }), 404
+
+        user = User.query.filter_by(id=userId).first()
+        if not user or not user.panelData:
+            return jsonify({
+                "status": "error",
+                "message": "Unauthorized",
+            }), 400
+
+        page = request.args.get('page', 1, type=int)
+        limit = request.args.get('limit', 10, type=int)
+        status_filter = request.args.get('status')
+
+        tickets_query = user.panelData.MyAssets
+        if not tickets_query:
+            return jsonify({
+                "status" : "error",
+                "message" : "No Tickets yet.",
+            }), 200
+
+        tickets = [t for t in tickets_query if str(t.assignedTo) == str(userId)]
+
+        if status_filter:
+            tickets = [t for t in tickets if t.status == status_filter]
+
+        total = len(tickets)
+
+        start = (page - 1) * limit
+        end = start + limit
+        paginated_tickets = tickets[start:end]
+
+        asset_list = []
+        for asset in paginated_tickets:
+            asset_list.append({
+                "id": asset.id,
+                "productId": asset.productId,
+                "productName": asset.productName,
+                "qty": asset.qty,
+                "dateofrequest": asset.dateofrequest.strftime('%Y-%m-%d %H:%M:%S'),
+                "department": asset.department,
+                "status": asset.status,
+            })
+
+        return jsonify({
+            "status": "success",
+            "data": asset_list,
+            "page": page,
+            "total_pages": (total + limit - 1) // limit,
+            "total_assets": total
         }), 200
 
     except Exception as e:

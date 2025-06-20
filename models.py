@@ -50,6 +50,17 @@ class SuperAdminPanel(db.Model):
     adminRemotePolicy = db.relationship('RemotePolicy', backref='superadminpanel', lazy=True)
     adminPayrollPolicy = db.relationship('PayrollPolicy', backref='superadminpanel', lazy=True)
     adminTaskManagement = db.relationship('TaskManagement', backref='superadminpanel', lazy=True)
+    adminHolidays = db.relationship('AdminHoliday', backref='superadminpanel', lazy=True)
+
+
+class AdminHoliday(db.Model):
+    __tablename__ = 'adminholiday'
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    superpanel = db.Column(db.Integer, db.ForeignKey('superadminpanel.id'), nullable=False)
+    date = db.Column(db.Date, unique=True, nullable=False)
+    name = db.Column(db.String(100), nullable=False)
+    country = db.Column(db.String(10), nullable=False, default='IN')
+    year = db.Column(db.Integer, nullable=False)
 
 
 class AdminDetail(db.Model):
@@ -324,7 +335,25 @@ class UserPanelData(db.Model):
     UserSalary = db.relationship('UserSalaryDetails', backref='user_panel', lazy=True)
     UserMessage = db.relationship('UserChat', backref='user_panel', lazy=True)
     MyTasks = db.relationship('TaskUser', backref='user_panel', lazy=True)
+    MyAssets = db.relationship('ProductAsset', backref='user_panel', lazy=True)
 
+
+class ProductAsset(db.Model):
+    __tablename__ = 'productasset'
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    superpanel = db.Column(db.Integer, db.ForeignKey('userpaneldata.id'), nullable=False)
+    productId = db.Column(db.String(100))
+    productName = db.Column(db.String(200))
+    category = db.Column(db.String(100))
+    qty = db.Column(db.Integer, default=1)
+    dateofrequest = db.Column(db.DateTime, default=datetime.utcnow)
+    department = db.Column(db.String(120))
+    purchaseDate = db.Column(db.Date, default=datetime.utcnow)
+    warrantyTill = db.Column(db.Date, nullable=True)
+    condition = db.Column(db.String(100)) 
+    status = db.Column(db.String(100), nullable=False)
+    location = db.Column(db.String(200))
+    assignedTo = db.Column(db.String(120))
 
 class UserChat(db.Model):
     __tablename__ = 'messages'
