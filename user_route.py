@@ -1633,7 +1633,7 @@ def interact_with_announcement(announcement_id):
             if like:
                 if not existing_like:
                     db.session.add(Likes(announcement_id=announcement_id, empId=user.empId))
-                    response["message"].append("liked")
+                    response["message"].append("Like Successfully.")
                 else:
                     response["message"].append("You have already liked this.")
             else:
@@ -1666,7 +1666,7 @@ def interact_with_announcement(announcement_id):
 
 
 # ====================================
-#        USER NOTICE SECTION
+#   USER NOTICE AND HOLIDAY SECTION
 # ====================================
 
 
@@ -1722,6 +1722,80 @@ def get_Notice():
             "status": "error",
             "message": "Internal Server Error",
             "error": str(e)
+        }), 500
+    
+
+@user.route('/holiday', methods=['GET'])
+def holidays():
+    try:
+        userId = g.user.get('userID') if g.user else None
+        if not userId:
+            return jsonify({
+                "status": "error",
+                "message": "Unauthorized",
+            }), 404
+
+        user = User.query.filter_by(id=userId).first()
+        if not user:
+            return jsonify({
+                "status": "error",
+                "message": "Unauthorized",
+            }), 404
+
+        superadmin = SuperAdmin.query.filter_by(superId=user.superadminId).first()
+        if not superadmin:
+            return jsonify({
+                "status": "error",
+                "message": "Unauthorized",
+            }), 404
+
+        holiday_list = superadmin.superadminPanel.adminHolidays if hasattr(superadmin.superadminPanel, 'adminHolidays') else []
+
+        if not holiday_list:
+            return jsonify({
+                "status": "error",
+                "message": "No holidays yet",
+            }), 404
+
+        today = datetime.utcnow().date()
+        upcoming = []
+        past = []
+
+        for holiday in holiday_list:
+            if holiday.is_enabled is False:
+                continue
+
+            holiday_info = {
+                "id": holiday.id,
+                "name": holiday.name,
+                "date": holiday.date.strftime('%Y-%m-%d'),
+                "country": holiday.country,
+                "year": holiday.year,
+                "is_enabled": holiday.is_enabled if holiday.is_enabled is not None else True,
+                "description": None 
+            }
+
+            if holiday.date >= today:
+                upcoming.append(holiday_info)
+            else:
+                past.append(holiday_info)
+
+        upcoming.sort(key=lambda x: x['date'])
+        past.sort(key=lambda x: x['date'])
+
+        return jsonify({
+            "status": "success",
+            "message": "Holiday list fetched successfully",
+            "upcoming": upcoming,
+            "past": past
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e),
         }), 500
 
 

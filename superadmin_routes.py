@@ -450,7 +450,6 @@ def all_punchDetails():
                 "message": "No users found under this panel",
             }), 404
 
-        # Get filters and pagination from query params
         status_filter = request.args.get('status')
         department_filter = request.args.get('department')
         search_query = request.args.get('search', '').lower()
@@ -737,7 +736,6 @@ def edit_user(userId):
                 "message": "No auth token or user ID found"
             }), 401
 
-        # Authorization check
         superadmin = SuperAdmin.query.filter_by(id=auth_user_id).first()
         if not superadmin:
             requesting_user = User.query.filter_by(id=auth_user_id).first()
@@ -747,7 +745,6 @@ def edit_user(userId):
                     "message": "Not authorized to update users"
                 }), 403
 
-        # Get the user to update
         user = User.query.filter_by(id=userId).first()
         if not user:
             return jsonify({
@@ -755,9 +752,8 @@ def edit_user(userId):
                 "message": "User not found"
             }), 404
 
-        # Define fields
         updatable_fields = [
-            'profileImage', 'userName', 'gender', 'number', 'userRole',
+            'userName', 'gender', 'number', 'userRole',
             'currentAddress', 'permanentAddress', 'postal', 'city',
             'state', 'country', 'nationality', 'panNumber', 'adharNumber',
             'uanNumber', 'department', 'onBoardingStatus', 'sourceOfHire',
@@ -834,7 +830,7 @@ def edit_user(userId):
         }), 500
 
 
-@superAdminBP.route('/all-users', methods=['POST'])          
+@superAdminBP.route('/all-users', methods=['POST'])
 def employeeCreation():
     data = request.form
 
@@ -3204,40 +3200,70 @@ def add_holidays():
         if err:
             return err, status
 
-        current_year = date.today().year
-        country = request.json.get('country', 'IN') 
+        data = request.get_json()
+        country = data.get('country', 'IN')
+        custom_holidays = data.get('custom_holidays', [])  # Optional list of {"date": "...", "name": "..."}
+
+        current_year = datetime.utcnow().year
         superpanel_id = superadmin.superadminPanel.id
 
-        existing = AdminHoliday.query.filter_by(
-            superpanel=superpanel_id,
-            year=current_year,
-            country=country
-        ).first()
-
-        if existing:
-            return jsonify({
-                "status": "exists",
-                "message": f"Holidays already added for {current_year} and superadmin."
-            }), 200
-
-        generated = holidays.CountryHoliday(country, years=current_year)
+        existing_holiday_dates = {
+            h.date for h in AdminHoliday.query.filter_by(
+                superpanel=superpanel_id,
+                year=current_year,
+                country=country
+            ).all()
+        }
 
         new_holidays = []
-        for holiday_date, name in generated.items():
-            new_holidays.append(AdminHoliday(
-                superpanel=superpanel_id,
-                date=holiday_date,
-                name=name,
-                country=country,
-                year=current_year
-            ))
+
+        for item in custom_holidays:
+            try:
+                date_obj = datetime.strptime(item['date'], '%Y-%m-%d').date()
+                if date_obj not in existing_holiday_dates:
+                    new_holidays.append(AdminHoliday(
+                        superpanel=superpanel_id,
+                        date=date_obj,
+                        name=item['name'],
+                        country=country,
+                        year=date_obj.year,
+                        is_enabled=True
+                    ))
+            except Exception as parse_error:
+                continue 
+
+        if not custom_holidays:
+            try:
+                generated = holidays.CountryHoliday(country, years=current_year)
+                for holiday_date, name in generated.items():
+                    if holiday_date not in existing_holiday_dates:
+                        new_holidays.append(AdminHoliday(
+                            superpanel=superpanel_id,
+                            date=holiday_date,
+                            name=name,
+                            country=country,
+                            year=current_year,
+                            is_enabled=True
+                        ))
+            except Exception as gen_error:
+                return jsonify({
+                    "status": "error",
+                    "message": f"Failed to generate holidays for country '{country}'",
+                    "error": str(gen_error)
+                }), 400
+
+        if not new_holidays:
+            return jsonify({
+                "status": "exists",
+                "message": f"No new holidays to add for {current_year} in {country}"
+            }), 200
 
         db.session.bulk_save_objects(new_holidays)
         db.session.commit()
 
         return jsonify({
             "status": "success",
-            "message": f"{len(new_holidays)} holidays added for {country} in {current_year}"
+            "message": f"{len(new_holidays)} holidays added successfully"
         }), 201
 
     except Exception as e:
@@ -3247,8 +3273,8 @@ def add_holidays():
             "message": "Internal Server Error",
             "error": str(e),
         }), 500
-    
 
+    
 @superAdminBP.route('/holiday', methods=['GET'])
 def get_holiday():
     try:
@@ -3291,7 +3317,8 @@ def get_holiday():
             "date": h.date.isoformat(),
             "name": h.name,
             "country": h.country,
-            "year": h.year
+            "year": h.year,
+            "is_enable": h.is_enabled if h.is_enabled is not None else True,
         } for h in sorted_holidays]
 
         return jsonify({
@@ -3309,9 +3336,50 @@ def get_holiday():
         }), 500
     
 
+@superAdminBP.route('/holiday/<int:holiday_id>', methods=['PUT'])
+def toggle_holiday(holiday_id):
+    try:
+        superadmin, err, status = get_authorized_superadmin()
+        if err:
+            return err, status
+
+        data = request.get_json()
+        new_status = data.get("is_enabled")
+
+        holiday = AdminHoliday.query.get(holiday_id)
+        if not holiday or holiday.superpanel != superadmin.superadminPanel.id:
+            return jsonify({
+                "status": "error",
+                "message": "Holiday not found or unauthorized"
+            }), 404
+
+        if new_status is not None:
+            holiday.is_enabled = bool(new_status)
+        else:
+            holiday.is_enabled = not holiday.is_enabled
+
+        db.session.commit()
+
+        return jsonify({
+            "status": "success",
+            "message": f"Holiday status updated to {holiday.is_enabled}",
+            "holiday_id": holiday.id,
+            "is_enabled": holiday.is_enabled
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e)
+        }), 500
+
+
 # ====================================
 #        DEPARTMENT SECTION           
 # ====================================
+
 
 @superAdminBP.route('/department', methods=['GET'])
 def get_by_department():
@@ -3356,6 +3424,7 @@ def get_by_department():
 # ====================================
 #        ASSETS SECTION           
 # ====================================
+
 
 @superAdminBP.route('/assets', methods=['GET'])
 def get_userAssets():
@@ -3417,7 +3486,7 @@ def get_userAssets():
         }), 500
 
 
-@superAdminBP.route('/assets/<int:asset_id>/status', methods=['PUT'])
+@superAdminBP.route('/assets/<int:asset_id>', methods=['PUT'])
 def update_asset_status(asset_id):
     try:
         superadmin, err, status = get_authorized_superadmin()

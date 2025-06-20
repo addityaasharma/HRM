@@ -61,6 +61,7 @@ class AdminHoliday(db.Model):
     name = db.Column(db.String(100), nullable=False)
     country = db.Column(db.String(10), nullable=False, default='IN')
     year = db.Column(db.Integer, nullable=False)
+    is_enabled = db.Column(db.Boolean, default=True)
 
 
 class AdminDetail(db.Model):
@@ -249,6 +250,7 @@ class PayrollPolicy(db.Model):
     )
     departmentType = db.Column(db.String(120))
     superpanel = db.Column(db.Integer, db.ForeignKey('superadminpanel.id'), nullable=False)
+
 
 # ====================================
 #           USER SECTION              
