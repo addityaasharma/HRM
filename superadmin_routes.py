@@ -3334,7 +3334,8 @@ def get_by_department():
 
         result = [{
             "name": u.userName,
-            "profileImage": u.profileImage
+            "profileImage": u.profileImage,
+            "department": u.department,
         } for u in users]
 
         return jsonify({
@@ -3424,13 +3425,6 @@ def update_asset_status(asset_id):
             return err, status
 
         data = request.get_json()
-        new_status = data.get('status')
-
-        if not new_status:
-            return jsonify({
-                "status": "error",
-                "message": "Missing 'status' in request body"
-            }), 400
 
         asset = ProductAsset.query.get(asset_id)
 
@@ -3447,12 +3441,26 @@ def update_asset_status(asset_id):
                 "message": "Unauthorized to update this asset"
             }), 403
 
-        asset.status = new_status
+        if 'status' in data:
+            asset.status = data['status']
+        if 'category' in data:
+            asset.category = data['category']
+        if 'dateofrequest' in data:
+            asset.dateofrequest = datetime.strptime(data['dateofrequest'], '%Y-%m-%d %H:%M:%S')
+        if 'purchaseDate' in data:
+            asset.purchaseDate = datetime.strptime(data['purchaseDate'], '%Y-%m-%d')
+        if 'warrantyTill' in data:
+            asset.warrantyTill = datetime.strptime(data['warrantyTill'], '%Y-%m-%d') if data['warrantyTill'] else None
+        if 'condition' in data:
+            asset.condition = data['condition']
+        if 'location' in data:
+            asset.location = data['location']
+
         db.session.commit()
 
         return jsonify({
             "status": "success",
-            "message": "Asset status updated successfully"
+            "message": "Asset updated successfully"
         }), 200
 
     except Exception as e:
