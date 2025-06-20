@@ -1,4 +1,4 @@
-from models import User,UserPanelData,db,SuperAdmin,PunchData, UserTicket, UserDocument, UserChat, UserLeave, ShiftTimeManagement, Announcement, Likes, Comments, Notice, ProductAsset
+from models import User,UserPanelData,db,SuperAdmin,PunchData, UserTicket, UserDocument, UserChat, UserLeave, ShiftTimeManagement, Announcement, Likes, Comments, Notice, ProductAsset, TaskUser ,TaskComments, TaskManagement
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask import Blueprint, request, json, jsonify, g
 from datetime import datetime,time, timedelta
@@ -1723,7 +1723,7 @@ def get_Notice():
             "message": "Internal Server Error",
             "error": str(e)
         }), 500
-    
+
 
 @user.route('/holiday', methods=['GET'])
 def holidays():
@@ -1803,6 +1803,7 @@ def holidays():
 #        USER ASSETS SECTION
 # ====================================
 
+
 @user.route('/assets', methods=['POST'])
 def request_assets():
     try:
@@ -1811,121 +1812,414 @@ def request_assets():
             return jsonify({
                 "status": "error",
                 "message": "Unauthorized",
-            }), 404
+            }), 401  # Changed from 404 to 401
 
         user = User.query.filter_by(id=userId).first()
         if not user:
             return jsonify({
                 "status": "error",
-                "message": "Unauthorized",
+                "message": "User not found",
             }), 404
 
+        # Check if user has panelData
+        if not hasattr(user, 'panelData') or not user.panelData:
+            return jsonify({
+                "status": "error",
+                "message": "User panel data not found"
+            }), 400
+
         data = request.get_json()
-        required_fields = [ 'productName', 'qty', 'dateofrequest']
+        if not data:
+            return jsonify({
+                "status": "error",
+                "message": "No JSON data provided"
+            }), 400
+
+        required_fields = ['productName', 'qty']
 
         for field in required_fields:
-            if field not in data:
+            if field not in data or not data[field]:
                 return jsonify({
                     "status": "error",
-                    "message": f"Missing required field: {field}"
+                    "message": f"Missing or empty required field: {field}"
                 }), 400
 
+        # Extract and validate data
+        category = data.get('category')
+        productId = data.get('productId')
+        condition = data.get('condition')
+        location = data.get('location')
+        qty = data.get('qty', 1)
+
+        # Validate qty is a positive number
+        try:
+            qty = int(qty)
+            if qty <= 0:
+                return jsonify({
+                    "status": "error",
+                    "message": "Quantity must be a positive number"
+                }), 400
+        except (ValueError, TypeError):
+            return jsonify({
+                "status": "error",
+                "message": "Quantity must be a valid number"
+            }), 400
+
+        # Handle purchaseDate
+        purchaseDate = None
+        if data.get('purchaseDate'):
+            try:
+                purchaseDate = datetime.strptime(data['purchaseDate'], '%Y-%m-%d')
+            except ValueError:
+                return jsonify({
+                    "status": "error",
+                    "message": "Invalid purchaseDate format. Use YYYY-MM-DD"
+                }), 400
+
+        # Handle warrantyTill
+        warrantyTill = None
+        if data.get('warrantyTill'):
+            try:
+                warrantyTill = datetime.strptime(data['warrantyTill'], '%Y-%m-%d')
+                # Validate warranty date is not in the past
+                if warrantyTill < datetime.now():
+                    return jsonify({
+                        "status": "error",
+                        "message": "Warranty date cannot be in the past"
+                    }), 400
+            except ValueError:
+                return jsonify({
+                    "status": "error",
+                    "message": "Invalid warrantyTill format. Use YYYY-MM-DD"
+                }), 400
+
+        # Validate purchase date is not in the future
+        if purchaseDate and purchaseDate > datetime.now():
+            return jsonify({
+                "status": "error",
+                "message": "Purchase date cannot be in the future"
+            }), 400
+
+        # Create the asset
         asset = ProductAsset(
             superpanel=user.panelData.id,
-            productId=data['productId'],
-            productName=data['productName'],
-            category=data['category'],
-            qty=data.get('qty', 1),
-            department=user.department,
-            purchaseDate=datetime.strptime(data['purchaseDate'], '%Y-%m-%d'),
-            dateofrequest=datetime.strptime(data['dateofrequest'], '%Y-%m-%d'),
-            warrantyTill=datetime.strptime(data['warrantyTill'], '%Y-%m-%d') if data.get('warrantyTill') else None,
-            condition=data['condition'],
+            productId=productId,
+            productName=data['productName'].strip(),  # Strip whitespace
+            category=category.strip() if category else None,
+            qty=qty,
+            department=getattr(user, 'department', None),  # Safe access
+            purchaseDate=purchaseDate,
+            warrantyTill=warrantyTill,
+            condition=condition.strip() if condition else None,
             status='pending',
-            location=data['location'],
-            assignedTo=str(user.empId)
+            location=location.strip() if location else None,
+            assignedTo=str(user.empId) if hasattr(user, 'empId') and user.empId else str(userId),
+            username=str(user.userName) if hasattr(user, 'userName') and user.userName else None,
+            dateofrequest=datetime.now()  # Add request timestamp
         )
 
         db.session.add(asset)
         db.session.commit()
 
+        # Add the asset to user's MyAssets if it exists
+        try:
+            if hasattr(user.panelData, 'MyAssets'):
+                if user.panelData.MyAssets is None:
+                    user.panelData.MyAssets = []
+                user.panelData.MyAssets.append(asset)
+                db.session.commit()
+        except Exception as e:
+            print(f"Warning: Could not add asset to user's MyAssets: {str(e)}")
+
         return jsonify({
             "status": "success",
             "message": "Asset request submitted successfully",
             "data": {
-                "asset_id": asset.id
+                "asset_id": asset.id,
+                "product_name": asset.productName,
+                "status": asset.status,
+                "request_date": asset.dateofrequest.strftime('%Y-%m-%d %H:%M:%S') if hasattr(asset, 'dateofrequest') and asset.dateofrequest else None
             }
         }), 201
 
     except Exception as e:
         db.session.rollback()
+        print(f"Error in request_assets: {str(e)}")  # Log the error
         return jsonify({
             "status": "error",
             "message": "Internal Server Error",
-            "error": str(e),
+            "error": str(e) if app.debug else "Something went wrong"  # Hide error details in production
         }), 500
 
 
 @user.route('/assets', methods=['GET'])
 def get_assets():
     try:
-        userId = g.user.get('userId') if g.user else None
+        userId = g.user.get('userID') if g.user else None
         if not userId:
             return jsonify({
                 "status": "error",
                 "message": "Unauthorized"
-            }), 404
+            }), 401
 
         user = User.query.filter_by(id=userId).first()
-        if not user or not user.panelData:
+        if not user:
             return jsonify({
                 "status": "error",
-                "message": "Unauthorized",
+                "message": "User not found"
+            }), 404
+
+        if not hasattr(user, 'panelData') or not user.panelData:
+            return jsonify({
+                "status": "error",
+                "message": "User panel data not found"
             }), 400
 
         page = request.args.get('page', 1, type=int)
         limit = request.args.get('limit', 10, type=int)
         status_filter = request.args.get('status')
 
-        tickets_query = user.panelData.MyAssets
-        if not tickets_query:
+        if page < 1:
+            page = 1
+        if limit < 1 or limit > 100:
+            limit = 10
+
+        user_assets = []
+        
+        if hasattr(user.panelData, 'MyAssets') and user.panelData.MyAssets:
+            try:
+                if hasattr(user.panelData.MyAssets, '__iter__'):
+                    user_assets = list(user.panelData.MyAssets)
+                else:
+                    user_assets = [user.panelData.MyAssets]
+            except Exception as e:
+                user_assets = []
+
+        if not user_assets:
+            try:
+                user_assets = ProductAsset.query.filter(
+                    db.or_(
+                        ProductAsset.assignedTo == str(userId),
+                        ProductAsset.assignedTo == str(getattr(user, 'empId', userId))
+                    )
+                ).all()
+            except Exception as e:
+                user_assets = []
+
+        if not user_assets and hasattr(user.panelData, 'id'):
+            try:
+                user_assets = ProductAsset.query.filter_by(
+                    superpanel=user.panelData.id
+                ).all()
+            except Exception as e:
+                user_assets = []
+
+        if not user_assets:
             return jsonify({
-                "status" : "error",
-                "message" : "No Tickets yet.",
+                "status": "success",
+                "message": "No assets found",
+                "data": [],
+                "page": page,
+                "total_pages": 0,
+                "total_assets": 0
             }), 200
 
-        tickets = [t for t in tickets_query if str(t.assignedTo) == str(userId)]
+        filtered_assets = []
+        for asset in user_assets:
+            try:
+                assigned_to = getattr(asset, 'assignedTo', None)
+                if assigned_to:
+                    if (str(assigned_to) == str(userId) or 
+                        str(assigned_to) == str(getattr(user, 'empId', ''))):
+                        filtered_assets.append(asset)
+                else:
+                    filtered_assets.append(asset)
+            except Exception as e:
+                print(f"Debug: Error processing asset: {str(e)}")
+                continue
 
         if status_filter:
-            tickets = [t for t in tickets if t.status == status_filter]
+            filtered_assets = [
+                asset for asset in filtered_assets 
+                if hasattr(asset, 'status') and asset.status == status_filter
+            ]
 
-        total = len(tickets)
-
+        total = len(filtered_assets)
         start = (page - 1) * limit
         end = start + limit
-        paginated_tickets = tickets[start:end]
+        paginated_assets = filtered_assets[start:end]
 
         asset_list = []
-        for asset in paginated_tickets:
-            asset_list.append({
-                "id": asset.id,
-                "productId": asset.productId,
-                "productName": asset.productName,
-                "qty": asset.qty,
-                "dateofrequest": asset.dateofrequest.strftime('%Y-%m-%d %H:%M:%S'),
-                "department": asset.department,
-                "status": asset.status,
-            })
+        for asset in paginated_assets:
+            try:
+                asset_data = {
+                    "id": getattr(asset, 'id', None),
+                    "productId": getattr(asset, 'productId', None),
+                    "productName": getattr(asset, 'productName', None),
+                    "category": getattr(asset, 'category', None),
+                    "qty": getattr(asset, 'qty', None),
+                    "department": getattr(asset, 'department', None),
+                    "status": getattr(asset, 'status', None),
+                    "condition": getattr(asset, 'condition', None),
+                    "location": getattr(asset, 'location', None),
+                    "assignedTo": getattr(asset, 'assignedTo', None)
+                }
+
+                if hasattr(asset, 'dateofrequest') and asset.dateofrequest:
+                    try:
+                        asset_data["dateofrequest"] = asset.dateofrequest.strftime('%Y-%m-%d %H:%M:%S')
+                    except:
+                        asset_data["dateofrequest"] = str(asset.dateofrequest)
+                else:
+                    asset_data["dateofrequest"] = None
+
+                if hasattr(asset, 'purchaseDate') and asset.purchaseDate:
+                    try:
+                        asset_data["purchaseDate"] = asset.purchaseDate.strftime('%Y-%m-%d')
+                    except:
+                        asset_data["purchaseDate"] = str(asset.purchaseDate)
+                else:
+                    asset_data["purchaseDate"] = None
+
+                if hasattr(asset, 'warrantyTill') and asset.warrantyTill:
+                    try:
+                        asset_data["warrantyTill"] = asset.warrantyTill.strftime('%Y-%m-%d')
+                    except:
+                        asset_data["warrantyTill"] = str(asset.warrantyTill)
+                else:
+                    asset_data["warrantyTill"] = None
+
+                asset_list.append(asset_data)
+
+            except Exception as e:
+                print(f"Debug: Error processing individual asset: {str(e)}")
+                continue
 
         return jsonify({
             "status": "success",
             "data": asset_list,
             "page": page,
-            "total_pages": (total + limit - 1) // limit,
+            "total_pages": (total + limit - 1) // limit if total > 0 else 0,
             "total_assets": total
         }), 200
 
     except Exception as e:
+        print(f"Debug: Exception in get_assets: {str(e)}")
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e)
+        }), 500
+    
+
+# ====================================
+#        USER ASSETS SECTION
+# ====================================
+
+@user.route('/project', methods=['GET'])
+def get_user_tasks_with_chat():
+    try:
+        userId = g.user.get('userID') if g.user else None
+        if not userId:
+            return jsonify({"status": "error", "message": "Unauthorized"}), 401
+
+        user = User.query.filter_by(id=userId).first()
+        if not user or not user.panelData:
+            return jsonify({"status": "error", "message": "User or panel not found"}), 404
+
+        assigned_tasks = TaskUser.query.filter_by(userPanelId=user.panelData.id).all()
+
+        task_list = []
+        for assigned in assigned_tasks:
+            task = assigned.taskmanagement
+
+            # Fetch comments (chat)
+            task_comments = TaskComments.query.filter_by(taskPanelId=task.id).all()
+            chat = []
+            for c in task_comments:
+                chat.append({
+                    "id": c.id,
+                    "userId": c.userId,
+                    "username": c.username,
+                    "comment": c.comments
+                })
+
+            task_list.append({
+                "task_id": task.id,
+                "title": task.title,
+                "description": task.description,
+                "assignedAt": task.assignedAt.strftime('%Y-%m-%d %H:%M:%S'),
+                "lastDate": task.lastDate.strftime('%Y-%m-%d'),
+                "status": task.status,
+                "links": task.links,
+                "files": task.files,
+                "is_completed": assigned.is_completed,
+                "chat": chat  # 👈 All related comments
+            })
+
+        return jsonify({
+            "status": "success",
+            "message": "Assigned tasks with chat fetched successfully",
+            "data": task_list
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e)
+        }), 500
+
+
+@user.route('/task/<int:task_id>/update', methods=['PUT'])
+def update_task_status_and_comment(task_id):
+    try:
+        userId = g.user.get('userID') if g.user else None
+        if not userId:
+            return jsonify({"status": "error", "message": "Unauthorized"}), 401
+
+        user = User.query.filter_by(id=userId).first()
+        if not user or not user.panelData:
+            return jsonify({"status": "error", "message": "User or panel not found"}), 404
+
+        data = request.get_json()
+        comment_text = data.get('comment')
+        mark_complete = data.get('mark_complete', False)
+
+        task_user = TaskUser.query.filter_by(taskPanelId=task_id, userPanelId=user.panelData.id).first()
+        if not task_user:
+            return jsonify({"status": "error", "message": "Task not assigned to this user"}), 403
+
+        if comment_text:
+            new_comment = TaskComments(
+                taskPanelId=task_id,
+                taskId=task_id,
+                userId=str(user.empId),
+                username=user.userName,
+                comments=comment_text
+            )
+            db.session.add(new_comment)
+
+        if mark_complete:
+            task_user.is_completed = True
+
+        db.session.flush()
+
+        all_assigned = TaskUser.query.filter_by(taskPanelId=task_id).all()
+        if all(user_task.is_completed for user_task in all_assigned):
+            task = TaskManagement.query.get(task_id)
+            if task:
+                task.status = "completed"
+
+        db.session.commit()
+
+        return jsonify({
+            "status": "success",
+            "message": "Task updated successfully"
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
         return jsonify({
             "status": "error",
             "message": "Internal Server Error",

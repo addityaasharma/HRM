@@ -24,6 +24,7 @@ class SuperAdmin(db.Model):
     companyName = db.Column(db.String(100), nullable=False)
     companyEmail = db.Column(db.String(120), nullable=False)
     company_password = db.Column(db.String(250), nullable=False)
+    company_image =db.Column(db.String(255))
 
     #details
     company_type = db.Column(db.String(250))
@@ -356,6 +357,7 @@ class ProductAsset(db.Model):
     status = db.Column(db.String(100), nullable=False)
     location = db.Column(db.String(200))
     assignedTo = db.Column(db.String(120))
+    username = db.Column(db.String(120))
 
 class UserChat(db.Model):
     __tablename__ = 'messages'
@@ -378,6 +380,7 @@ class TaskManagement(db.Model):
     lastDate = db.Column(db.DateTime)
     links = db.Column(db.JSON)
     files = db.Column(db.JSON)
+    status = db.Column(db.String(120))
     comments = db.relationship('TaskComments',backref='taskmanagement', cascade='all, delete-orphan')
     users = db.relationship('TaskUser',backref='taskmanagement', cascade='all, delete-orphan')
 

@@ -142,53 +142,85 @@ def superadmin_login():
             'message': 'All fields are required',
         }), 400
 
-    exist_admin = SuperAdmin.query.filter_by(companyEmail=data['companyEmail']).first()
+    email = data['companyEmail']
+    password = data['company_password']
 
-    if not exist_admin:
+    # Try SuperAdmin first
+    exist_admin = SuperAdmin.query.filter_by(companyEmail=email).first()
+
+    if exist_admin:
+        if not check_password_hash(exist_admin.company_password, password):
+            return jsonify({
+                'status': 'error',
+                'message': 'Incorrect password',
+            }), 401
+
+        panel = SuperAdminPanel.query.filter_by(id=exist_admin.superadminPanel.id).first()
+        panel_data = {
+            'id': panel.id,
+            'alluser': [
+                {
+                    'id': user.id,
+                    'userName': user.userName,
+                    'email': user.email,
+                    'empId': user.empId,
+                    'userRole': user.userRole,
+                }
+                for user in panel.allUsers
+            ]
+        } if panel else None
+
+        access_token, refresh_token = create_tokens(user_id=exist_admin.id, role='super_admin')
+
         return jsonify({
-            'status': 'error',
-            'message': 'No user found with this email',
-        }), 404
+            'status': 'success',
+            'message': 'Login successful (SuperAdmin)',
+            'data': {
+                'id': exist_admin.id,
+                'superID': exist_admin.superId,
+                'companyName': exist_admin.companyName,
+                'companyEmail': exist_admin.companyEmail,
+                'paneldata': panel_data,
+                'is_super_admin': exist_admin.is_super_admin
+            },
+            'token': {
+                'access_token': access_token,
+                'refresh_token': refresh_token
+            }
+        }), 200
 
-    if not check_password_hash(exist_admin.company_password, data['company_password']):
+    # Try User login (HR only)
+    user = User.query.filter_by(email=email).first()
+    if user and user.userRole.lower() == 'hr':
+        if not check_password_hash(user.password, password):  # Assumes User model has `password` field
+            return jsonify({
+                'status': 'error',
+                'message': 'Incorrect password',
+            }), 401
+
+        access_token, refresh_token = create_tokens(user_id=user.id, role='hr')
+
         return jsonify({
-            'status': 'error',
-            'message': 'Incorrect password',
-        }), 401
-
-    panel = SuperAdminPanel.query.filter_by(id=exist_admin.superadminPanel.id).first()
-    panel_data = {
-        'id': panel.id,
-        'alluser': [
-            {
+            'status': 'success',
+            'message': 'Login successful (HR)',
+            'data': {
                 'id': user.id,
                 'userName': user.userName,
                 'email': user.email,
                 'empId': user.empId,
                 'userRole': user.userRole,
+                'superadminId': user.superadminId
+            },
+            'token': {
+                'access_token': access_token,
+                'refresh_token': refresh_token
             }
-            for user in panel.allUsers
-        ]
-    } if panel else None
-
-    access_token, refresh_token = create_tokens(user_id=exist_admin.id, role='super_admin')
+        }), 200
 
     return jsonify({
-        'status': 'success',
-        'message': 'Login successful',
-        'data': {
-            'id': exist_admin.id,
-            'superID': exist_admin.superId,
-            'companyName': exist_admin.companyName,
-            'companyEmail': exist_admin.companyEmail,
-            'paneldata': panel_data,
-            'is_super_admin': exist_admin.is_super_admin
-        },
-        'token': {
-            'access_token': access_token,
-            'refresh_token': refresh_token
-        }
-    }), 200
+        "status": "error",
+        "message": "Unauthorized: Account not found or role not allowed",
+    }), 404
 
 
 @superAdminBP.route('/mydetails', methods=['GET'])
@@ -299,13 +331,18 @@ def edit_myDetails():
         if not userId:
             return jsonify({"status": "error", "message": "Unauthorized"}), 401
 
-        data = request.get_json()
-        if not data:
-            return jsonify({"status": "error", "message": "No input data provided"}), 400
-
         superadmin = SuperAdmin.query.filter_by(id=userId).first()
         if not superadmin:
             return jsonify({"status": "error", "message": "SuperAdmin not found"}), 404
+
+        data = request.form.to_dict()
+        
+        if 'company_image' in request.files:
+            image_file = request.files['company_image']
+            if image_file:
+                upload_result = cloudinary.uploader.upload(image_file)
+                image_url = upload_result.get('secure_url')
+                superadmin.company_image = image_url
 
         superadmin.companyName = data.get('companyName', superadmin.companyName)
         superadmin.companyEmail = data.get('companyEmail', superadmin.companyEmail)
@@ -2963,18 +3000,30 @@ def get_employee_documents():
 @superAdminBP.route('/project', methods=['POST'])
 def add_Project():
     try:
-        superadmin, err, status = get_authorized_superadmin()
-        if err:
-            return err, status
+        userID = g.user.get('userID') if g.user else None
+        if not userID:
+            return None, jsonify({"status": "error", "message": "No auth token"}), 401
+
+        superadmin = SuperAdmin.query.filter_by(id=userID).first()
+        if not superadmin:
+            user = User.query.filter_by(id=userID).first()
+            if not user or user.userRole.lower() != 'teamlead':
+                return None, jsonify({"status": "error", "message": "Unauthorized"}), 403
+            
+            superadmin = SuperAdmin.query.filter_by(superId=user.superadminId).first()
+            if not superadmin:
+                return None, jsonify({"status": "error", "message": "No superadmin found"}), 404
 
         title = request.form.get('title')
         description = request.form.get('description')
         lastDate = request.form.get('lastDate')
+        status = request.form.get('status')
+        print(title,lastDate)
 
         links = request.form.getlist('links') or []
         files = request.form.getlist('files') or []
-
         emp_ids = request.form.getlist('empIDs')
+
         if not title or not lastDate:
             return jsonify({
                 "status": "error",
@@ -2994,6 +3043,7 @@ def add_Project():
             title=title,
             description=description,
             lastDate=lastDate_dt,
+            status=status,
             links=links,
             files=files
         )
@@ -3012,8 +3062,6 @@ def add_Project():
                     image=getattr(user, 'profileImage', '')
                 )
                 db.session.add(task_user)
-            else:
-                print(f"⚠️ No user found for emp_id: {emp_id}")
 
         db.session.commit()
 
@@ -3425,9 +3473,8 @@ def get_by_department():
 #        ASSETS SECTION           
 # ====================================
 
-
 @superAdminBP.route('/assets', methods=['GET'])
-def get_userAssets():
+def get_all_assets():
     try:
         superadmin, err, status = get_authorized_superadmin()
         if err:
@@ -3437,48 +3484,54 @@ def get_userAssets():
         limit = request.args.get('limit', 10, type=int)
         status_filter = request.args.get('status')
 
-        all_assets = []
-        for user in superadmin.superadminPanel.allUsers:
-            if user.panelData and hasattr(user.panelData, 'MyAssets'):
-                for asset in user.panelData.MyAssets:
-                    all_assets.append(asset)
+        all_users = superadmin.superadminPanel.allUsers
+        if not all_users:
+            return jsonify({
+                "status": "error",
+                "message": "No users yet.",
+                "data": []
+            }), 200
 
-        if status_filter:
-            all_assets = [a for a in all_assets if a.status == status_filter]
+        asset_list = []
+        for user in all_users:
+            if user.panelData:
+                user_assets = ProductAsset.query.filter_by(superpanel=user.panelData.id).all()
+                for asset in user_assets:
+                    if status_filter and asset.status != status_filter:
+                        continue  # skip asset if status doesn't match
+                    asset_list.append({
+                        "id": asset.id,
+                        "productId": asset.productId,
+                        "productName": asset.productName,
+                        "category": asset.category,
+                        "qty": asset.qty,
+                        "dateofrequest": asset.dateofrequest.strftime('%Y-%m-%d %H:%M:%S') if asset.dateofrequest else None,
+                        "department": asset.department,
+                        "purchaseDate": asset.purchaseDate.strftime('%Y-%m-%d') if asset.purchaseDate else None,
+                        "warrantyTill": asset.warrantyTill.strftime('%Y-%m-%d') if asset.warrantyTill else None,
+                        "condition": asset.condition,
+                        "status": asset.status,
+                        "location": asset.location,
+                        "assignedTo": asset.assignedTo,
+                        "username": asset.username
+                    })
 
-        total = len(all_assets)
-
+        total = len(asset_list)
         start = (page - 1) * limit
         end = start + limit
-        paginated_assets = all_assets[start:end]
-
-        result = []
-        for asset in paginated_assets:
-            result.append({
-                "id": asset.id,
-                "productId": asset.productId,
-                "productName": asset.productName,
-                "category": asset.category,
-                "qty": asset.qty,
-                "dateofrequest": asset.dateofrequest.strftime('%Y-%m-%d %H:%M:%S'),
-                "department": asset.department,
-                "purchaseDate": asset.purchaseDate.strftime('%Y-%m-%d'),
-                "warrantyTill": asset.warrantyTill.strftime('%Y-%m-%d') if asset.warrantyTill else None,
-                "condition": asset.condition,
-                "status": asset.status,
-                "location": asset.location,
-                "assignedTo": asset.assignedTo
-            })
+        paginated_assets = asset_list[start:end]
 
         return jsonify({
             "status": "success",
-            "data": result,
+            "message": "Assets fetched successfully",
+            "total_assets": total,
             "page": page,
             "total_pages": (total + limit - 1) // limit,
-            "total_assets": total
+            "data": paginated_assets
         }), 200
 
     except Exception as e:
+        db.session.rollback()
         return jsonify({
             "status": "error",
             "message": "Internal Server Error",
@@ -3502,13 +3555,6 @@ def update_asset_status(asset_id):
                 "status": "error",
                 "message": "Asset not found"
             }), 404
-
-        asset_owner = User.query.filter_by(id=asset.assignedTo).first()
-        if not asset_owner or asset_owner not in superadmin.superadminPanel.allUsers:
-            return jsonify({
-                "status": "error",
-                "message": "Unauthorized to update this asset"
-            }), 403
 
         if 'status' in data:
             asset.status = data['status']
