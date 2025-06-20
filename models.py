@@ -52,6 +52,14 @@ class SuperAdminPanel(db.Model):
     adminPayrollPolicy = db.relationship('PayrollPolicy', backref='superadminpanel', lazy=True)
     adminTaskManagement = db.relationship('TaskManagement', backref='superadminpanel', lazy=True)
     adminHolidays = db.relationship('AdminHoliday', backref='superadminpanel', lazy=True)
+    adminDepartment = db.relationship('AdminDepartment', backref='superadminpanel', lazy=True)
+
+
+class AdminDepartment(db.Model):
+    __tablename__ = 'department'
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    name = db.Column(db.String(120),nullable=False)
+    superpanel = db.Column(db.Integer, db.ForeignKey('superadminpanel.id'), nullable=False)
 
 
 class AdminHoliday(db.Model):
@@ -320,6 +328,17 @@ class User(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 
+class UserAccess(db.Model):
+    __tablename__ = 'useraccess'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    section = db.Column(db.String(100), nullable=False)      # e.g., "salary", "ticket", "leave"
+    permission = db.Column(db.String(100), nullable=False)   # e.g., "view", "edit", "assign", "delete"
+    allowed = db.Column(db.Boolean, default=False)           # True or False
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    user = db.relationship('User', backref='access_permissions')
+
+
 class UserPanelData(db.Model):
     __tablename__ = 'userpaneldata'
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
@@ -358,6 +377,7 @@ class ProductAsset(db.Model):
     location = db.Column(db.String(200))
     assignedTo = db.Column(db.String(120))
     username = db.Column(db.String(120))
+
 
 class UserChat(db.Model):
     __tablename__ = 'messages'
@@ -454,7 +474,18 @@ class UserTicket(db.Model):
     department = db.Column(db.String(120))
     document = db.Column(db.String(255))
     status = db.Column(db.String(255))
+    assigned_to_empId = db.Column(db.String(120), nullable=True)
     userticketpanel = db.Column(db.Integer, db.ForeignKey('userpaneldata.id'), nullable=False)
+
+
+class TicketAssignmentLog(db.Model):
+    __tablename__ = 'ticketassignmentlog'
+    id = db.Column(db.Integer, primary_key=True)
+    ticket_id = db.Column(db.Integer, db.ForeignKey('userticket.id'), nullable=False)
+    assigned_by_empId = db.Column(db.String(120), nullable=False)  
+    assigned_to_empId = db.Column(db.String(120), nullable=False)
+    assigned_at = db.Column(db.DateTime, default=datetime.utcnow)
+    ticket = db.relationship('UserTicket', backref='assignment_logs')
 
 
 class EmployeeRequest(db.Model):

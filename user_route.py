@@ -2113,7 +2113,7 @@ def get_assets():
     
 
 # ====================================
-#        USER ASSETS SECTION
+#        USER PROJECT SECTION
 # ====================================
 
 @user.route('/project', methods=['GET'])

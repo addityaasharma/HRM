@@ -1,4 +1,4 @@
-from models import SuperAdmin, SuperAdminPanel, db, PunchData, User, UserTicket, AdminLeave, AdminDoc, Announcement, AdminLeave, BonusPolicy, UserLeave, UserPanelData, ShiftTimeManagement, RemotePolicy, PayrollPolicy, Notice, TaskManagement, TaskUser, TaskComments, AdminDetail, Likes, AdminHoliday, ProductAsset
+from models import SuperAdmin, SuperAdminPanel, db, PunchData, User, UserTicket, AdminLeave, AdminDoc, Announcement, AdminLeave, BonusPolicy, UserLeave, UserPanelData, ShiftTimeManagement, RemotePolicy, PayrollPolicy, Notice, TaskManagement, TaskUser, TaskComments, AdminDetail, Likes, AdminHoliday, ProductAsset, AdminDepartment, TicketAssignmentLog, UserAccess
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask import Blueprint, request, jsonify, g
 from middleware import create_tokens
@@ -798,13 +798,11 @@ def edit_user(userId):
             'fieldOfStudy', 'dateOfCompletion', 'skills', 'occupation',
             'company', 'experience', 'duration', 'shift', 'birthday'
         ]
-
-        # Field type groups
         integer_fields = ['currentSalary', 'experience']
         date_fields = ['dateOfCompletion']
-        datetime_fields = ['joiningDate','birthday']
+        datetime_fields = ['joiningDate', 'birthday']
         string_fields = [
-            'profileImage', 'userName', 'gender', 'number', 'currentAddress', 
+            'profileImage', 'userName', 'gender', 'number', 'currentAddress',
             'permanentAddress', 'postal', 'city', 'state', 'country', 'nationality',
             'panNumber', 'adharNumber', 'uanNumber', 'department', 'onBoardingStatus',
             'sourceOfHire', 'schoolName', 'degree', 'fieldOfStudy', 'occupation',
@@ -812,51 +810,72 @@ def edit_user(userId):
         ]
         text_fields = ['skills']
 
+        updated_any = False
+
         for field in updatable_fields:
             if field in data:
                 value = data[field]
 
-                # Handle empty string as None
+                # Convert to correct type
                 if value == '':
                     setattr(user, field, None)
-                    continue
-
-                if field in datetime_fields:
+                elif field in datetime_fields or field in date_fields:
                     try:
                         setattr(user, field, date.fromisoformat(value))
                     except ValueError:
-                        return jsonify({
-                            'status': 'error',
-                            'message': f'Invalid datetime format for {field}. Use YYYY-MM-DD or full ISO format.'
-                        }), 400
-
-                elif field in date_fields:
-                    try:
-                        setattr(user, field, date.fromisoformat(value))
-                    except ValueError:
-                        return jsonify({
-                            'status': 'error',
-                            'message': f'Invalid date format for {field}. Use YYYY-MM-DD.'
-                        }), 400
-
+                        return jsonify({'status': 'error', 'message': f'Invalid date format for {field}'}), 400
                 elif field in integer_fields:
                     try:
                         setattr(user, field, int(value))
                     except ValueError:
-                        return jsonify({
-                            'status': 'error',
-                            'message': f'{field} must be a valid integer.'
-                        }), 400
-
-                elif field in string_fields or field in text_fields:
+                        return jsonify({'status': 'error', 'message': f'{field} must be a valid integer'}), 400
+                else:
                     setattr(user, field, value)
 
-        db.session.commit()
+                updated_any = True
 
-        return jsonify({
-            "status": "success",
-            "message": "User updated successfully"
-        }), 200
+        raw_access = data.get("access")
+        if raw_access is not None:
+            try:
+                UserAccess.query.filter_by(user_id=user.id).delete()
+
+                access_list = json.loads(raw_access)
+                for access in access_list:
+                    section = access.get("section")
+                    permission = access.get("permission")
+                    allowed = access.get("allowed", False)
+
+                    if section and permission:
+                        new_access = UserAccess(
+                            user_id=user.id,
+                            section=section.lower(),
+                            permission=permission.lower(),
+                            allowed=bool(allowed)
+                        )
+                        db.session.add(new_access)
+
+                updated_any = True
+
+            except Exception as access_error:
+                db.session.rollback()
+                return jsonify({
+                    "status": "error",
+                    "message": "Access update failed",
+                    "error": str(access_error)
+                }), 400
+
+        # Only commit if something changed
+        if updated_any:
+            db.session.commit()
+            return jsonify({
+                "status": "success",
+                "message": "User and/or access updated successfully"
+            }), 200
+        else:
+            return jsonify({
+                "status": "info",
+                "message": "No changes were made"
+            }), 200
 
     except Exception as e:
         db.session.rollback()
@@ -888,17 +907,17 @@ def employeeCreation():
         superadmin = SuperAdmin.query.filter_by(id=userID).first()
         if superadmin:
             panel_id = superadmin.superadminPanel.id
-            super_id = superadmin.superId
-            superadminID = super_id  # ✅ Assign superadminID
+            superadminID = superadmin.superId
         else:
             user = User.query.filter_by(id=userID).first()
             if not user or user.userRole.lower() != 'hr':
                 return jsonify({"status": "error", "message": "You are not allowed to manage this"}), 403
             superadminID = user.superadminId
+            superadmin = SuperAdmin.query.filter_by(superId=superadminID).first()
+            panel_id = user.superadmin_panel_id
 
-        superadminPanel = SuperAdmin.query.filter_by(superId=superadminID).first()
-        if not superadminPanel:
-            return jsonify({"status": "error", "message": "No admin found"}), 404
+        if not superadmin:
+            return jsonify({"status": "error", "message": "No superadmin found"}), 404
 
         newUser = User(
             superadminId=superadminID,
@@ -908,17 +927,47 @@ def employeeCreation():
             userRole=data.get('userRole'),
             gender=data.get('gender'),
             empId=gen_empId(),
-            superadmin_panel_id=panel_id if superadmin else superadminPanel.id,
+            superadmin_panel_id=panel_id,
         )
 
         db.session.add(newUser)
         db.session.commit()
 
-        return jsonify({"status": "success", "message": "Added Successfully"}), 201
+        raw_access = data.get('access')
+        if raw_access:
+            try:
+                access_list = json.loads(raw_access)
+                for access in access_list:
+                    section = access.get("section")
+                    permission = access.get("permission")
+                    allowed = access.get("allowed", False)
+
+                    if section and permission:
+                        new_access = UserAccess(
+                            user_id=newUser.id,
+                            section=section.lower(),
+                            permission=permission.lower(),
+                            allowed=bool(allowed)
+                        )
+                        db.session.add(new_access)
+                db.session.commit()
+            except Exception as access_error:
+                db.session.rollback()
+                return jsonify({
+                    "status": "error",
+                    "message": "User created, but access assignment failed",
+                    "error": str(access_error)
+                }), 207 
+
+        return jsonify({"status": "success", "message": "User created successfully"}), 201
 
     except Exception as e:
         db.session.rollback()
-        return jsonify({"status": "error", "message": "Internal Server Error", "error": str(e)}), 500
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e)
+        }), 500
 
 
 @superAdminBP.route('/all-users/<int:id>', methods=['DELETE'])
@@ -962,7 +1011,7 @@ def allTickets():
             return jsonify({
                 'status': 'error',
                 'message': "No user or auth token found."
-            })
+            }), 401
 
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 10, type=int)
@@ -970,10 +1019,10 @@ def allTickets():
         department_filter = request.args.get('department', '').strip()
         status_filter = request.args.get('status', '').strip()
         priority_filter = request.args.get('priority', '').strip()
-        
+
         if page < 1:
             page = 1
-        if per_page < 1 or per_page > 100: 
+        if per_page < 1 or per_page > 100:
             per_page = 10
 
         superadmin = SuperAdmin.query.filter_by(id=userId).first()
@@ -999,6 +1048,7 @@ def allTickets():
             }), 404
 
         all_tickets = []
+
         for user in users:
             if user.panelData and user.panelData.UserTicket:
                 for ticket in user.panelData.UserTicket:
@@ -1008,12 +1058,19 @@ def allTickets():
                         continue
                     if priority_filter and ticket.priority and ticket.priority.lower() != priority_filter.lower():
                         continue
-                    
+
+                    logs = [{
+                        'assigned_by': log.assigned_by_empId,
+                        'assigned_to': log.assigned_to_empId,
+                        'assigned_at': log.assigned_at.isoformat() if log.assigned_at else None
+                    } for log in ticket.assignment_logs]
+
                     ticket_data = {
                         'ticket_id': ticket.id,
                         'user_name': ticket.userName,
                         'user_id': ticket.userId,
                         'emp_id': user.empId,
+                        'user_email': user.email,
                         'date': ticket.date.isoformat() if ticket.date else None,
                         'topic': ticket.topic,
                         'problem': ticket.problem,
@@ -1021,19 +1078,20 @@ def allTickets():
                         'department': ticket.department,
                         'document': ticket.document,
                         'status': ticket.status,
-                        'user_email': user.email
+                        'assigned_to_empId': ticket.assigned_to_empId,
+                        'logs': logs
                     }
                     all_tickets.append(ticket_data)
 
         all_tickets.sort(key=lambda x: x['date'] if x['date'] else '', reverse=True)
-        
+
         total_tickets = len(all_tickets)
         total_pages = math.ceil(total_tickets / per_page) if total_tickets > 0 else 1
-        
+
         start_index = (page - 1) * per_page
         end_index = start_index + per_page
         paginated_tickets = all_tickets[start_index:end_index]
-        
+
         unique_departments = list(set([ticket['department'] for ticket in all_tickets if ticket['department']]))
         unique_statuses = list(set([ticket['status'] for ticket in all_tickets if ticket['status']]))
         unique_priorities = list(set([ticket['priority'] for ticket in all_tickets if ticket['priority']]))
@@ -1084,13 +1142,6 @@ def editTicket(ticket_id):
             'message': "No data provided",
         }), 400
 
-    required_fields = ['status']
-    if not all(field in data for field in required_fields):
-        return jsonify({
-            'status': 'error',
-            'message': 'All fields (status, userID, ticket_id) are required.'
-        }), 400
-
     try:
         userID = g.user.get('userID') if g.user else None
         if not userID:
@@ -1099,21 +1150,6 @@ def editTicket(ticket_id):
                 'message': 'No auth or user found'
             }), 400
 
-        superadmin = SuperAdmin.query.filter_by(id=userID).first()
-        if not superadmin:
-            return jsonify({
-                'status': 'error',
-                'message': 'No superadmin found with this id'
-            }), 400
-
-        if not superadmin.is_super_admin:
-            user = User.query.filter_by(id=userID).first()
-            if not user or user.userRole.lower() != 'hr':
-                return jsonify({
-                    'status': 'error',
-                    'message': 'Unauthorized: You do not have access to this route'
-                }), 403
-
         ticket = UserTicket.query.filter_by(id=ticket_id).first()
         if not ticket:
             return jsonify({
@@ -1121,7 +1157,49 @@ def editTicket(ticket_id):
                 'message': 'Ticket not found.'
             }), 404
 
-        ticket.status = data['status']
+        superadmin = SuperAdmin.query.filter_by(id=userID).first()
+        user = None
+        is_superadmin = False
+
+        if superadmin and superadmin.is_super_admin:
+            is_superadmin = True
+        else:
+            user = User.query.filter_by(id=userID).first()
+            if not user:
+                return jsonify({'status': 'error', 'message': 'User not found'}), 404
+
+        if 'status' in data:
+            ticket.status = data['status']
+            ticket.problem = data['problem']
+
+        if 'assign_to_empId' in data:
+            new_assignee_empId = data['assign_to_empId']
+
+            assigned_to_user = User.query.filter_by(empId=new_assignee_empId).first()
+            if not assigned_to_user:
+                return jsonify({'status': 'error', 'message': 'User with empId not found'}), 404
+
+            allowed_to_assign = False
+
+            if is_superadmin:
+                allowed_to_assign = True
+            elif user.userRole.lower() == 'hr':
+                allowed_to_assign = True
+            elif ticket.assigned_to_empId == user.empId:
+                allowed_to_assign = True
+
+            if not allowed_to_assign:
+                return jsonify({'status': 'error', 'message': 'You are not authorized to assign this ticket'}), 403
+
+            if ticket.assigned_to_empId != new_assignee_empId:
+                log = TicketAssignmentLog(
+                    ticket_id=ticket.id,
+                    assigned_by_empId=superadmin.companyEmail if is_superadmin else user.empId,
+                    assigned_to_empId=new_assignee_empId
+                )
+                db.session.add(log)
+
+            ticket.assigned_to_empId = new_assignee_empId
 
         db.session.commit()
 
@@ -1129,7 +1207,8 @@ def editTicket(ticket_id):
             'status': 'success',
             'message': 'Ticket updated successfully',
             'ticket_id': ticket.id,
-            'new_status': ticket.status
+            'new_status': ticket.status,
+            'assigned_to': ticket.assigned_to_empId
         }), 200
 
     except Exception as e:
@@ -1137,6 +1216,87 @@ def editTicket(ticket_id):
         return jsonify({
             'status': "error",
             'message': "Internal Server Error",
+            'error': str(e)
+        }), 500
+
+
+@superAdminBP.route('/assigned-tickets', methods=['GET'])
+def get_assigned_tickets():
+    try:
+        userId = g.user.get('userID') if g.user else None
+        if not userId:
+            return jsonify({
+                'status': 'error',
+                'message': 'No user or auth token found.'
+            }), 401
+
+        user = User.query.filter_by(id=userId).first()
+        if not user:
+            return jsonify({
+                'status': 'error',
+                'message': 'User not found'
+            }), 404
+
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 10, type=int)
+
+        if page < 1:
+            page = 1
+        if per_page < 1 or per_page > 100:
+            per_page = 10
+
+        tickets = UserTicket.query.filter_by(assigned_to_empId=user.empId).order_by(UserTicket.date.desc()).all()
+
+        total_tickets = len(tickets)
+        total_pages = math.ceil(total_tickets / per_page) if total_tickets > 0 else 1
+
+        start = (page - 1) * per_page
+        end = start + per_page
+        paginated = tickets[start:end]
+
+        ticket_list = []
+        for ticket in paginated:
+            logs = [{
+                'assigned_by': log.assigned_by_empId,
+                'assigned_to': log.assigned_to_empId,
+                'assigned_at': log.assigned_at.isoformat() if log.assigned_at else None
+            } for log in ticket.assignment_logs]
+
+            ticket_list.append({
+                'ticket_id': ticket.id,
+                'topic': ticket.topic,
+                'problem': ticket.problem,
+                'priority': ticket.priority,
+                'department': ticket.department,
+                'document': ticket.document,
+                'status': ticket.status,
+                'assigned_to_empId': ticket.assigned_to_empId,
+                'created_by': ticket.userName,
+                'date': ticket.date.isoformat() if ticket.date else None,
+                'logs': logs
+            })
+
+        return jsonify({
+            'status': 'success',
+            'assigned_to': user.empId,
+            'pagination': {
+                'current_page': page,
+                'per_page': per_page,
+                'total_tickets': total_tickets,
+                'total_pages': total_pages,
+                'has_next': page < total_pages,
+                'has_prev': page > 1,
+                'next_page': page + 1 if page < total_pages else None,
+                'prev_page': page - 1 if page > 1 else None
+            },
+            'tickets': ticket_list
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            'status': 'error',
+            'message': 'Internal Server Error',
             'error': str(e)
         }), 500
 
@@ -3093,6 +3253,23 @@ def get_all_projects():
 
         task_list = []
         for task in tasks:
+            assigned_users = []
+            all_completed = True
+
+            for user in task.users:
+                assigned_users.append({
+                    "userPanelId": user.userPanelId,
+                    "empId": user.user_emp_id,
+                    "userName": user.user_userName,
+                    "image": user.image,
+                    "isCompleted": user.is_completed
+                })
+
+                if not user.is_completed:
+                    all_completed = False
+
+            task_status = "completed" if all_completed and assigned_users else "pending"
+
             comments = []
             for comment in task.comments:
                 comments.append({
@@ -3103,16 +3280,6 @@ def get_all_projects():
                     "timestamp": comment.timestamp.isoformat() if hasattr(comment, "timestamp") and comment.timestamp else None
                 })
 
-            assigned_users = []
-            for user in task.users:
-                assigned_users.append({
-                    "userPanelId": user.userPanelId,
-                    "empId": user.user_emp_id,
-                    "userName": user.user_userName,
-                    "image": user.image,
-                    "isCompleted": user.is_completed
-                })
-
             task_list.append({
                 "id": task.id,
                 "title": task.title,
@@ -3121,6 +3288,7 @@ def get_all_projects():
                 "lastDate": task.lastDate.isoformat() if task.lastDate else None,
                 "links": task.links,
                 "files": task.files,
+                "status": task_status,
                 "comments": comments,
                 "assignedUsers": assigned_users
             })
@@ -3425,51 +3593,6 @@ def toggle_holiday(holiday_id):
 
 
 # ====================================
-#        DEPARTMENT SECTION           
-# ====================================
-
-
-@superAdminBP.route('/department', methods=['GET'])
-def get_by_department():
-    try:
-        superadmin, err, status = get_authorized_superadmin()
-        if err:
-            return err, status
-
-        filter_department = request.args.get('department')
-
-        users = superadmin.superadminPanel.allUsers
-        if not users:
-            return jsonify({
-                "status": "error",
-                "message": "No users yet."
-            }), 400
-
-        if filter_department:
-            users = [u for u in users if u.department == filter_department]
-
-        result = [{
-            "name": u.userName,
-            "profileImage": u.profileImage,
-            "department": u.department,
-        } for u in users]
-
-        return jsonify({
-            "status": "success",
-            "total": len(result),
-            "users": result
-        }), 200
-
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({
-            "status": "error",
-            "message": "Internal Server Error",
-            "error": str(e)
-        }), 500
-
-
-# ====================================
 #        ASSETS SECTION           
 # ====================================
 
@@ -3576,6 +3699,118 @@ def update_asset_status(asset_id):
         return jsonify({
             "status": "success",
             "message": "Asset updated successfully"
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e)
+        }), 500
+
+
+# ====================================
+#      DEPARTMENT SECTION           
+# ====================================
+
+
+@superAdminBP.route('/department', methods=['POST'])
+def add_department():
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({
+                "status" : "error",
+                "message" : "No data"
+            }), 400
+        
+        superadmin, err, status = get_authorized_superadmin()
+        if err:
+            return err, status
+        
+        department = AdminDepartment(
+            superpanel = superadmin.superadminPanel.id,
+            name = data['name']
+        )
+
+        db.session.add(department)
+        db.session.commit()
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status" : "error",
+            "message" : "Internal Server Error",
+            "error" : str(e)
+        }), 500
+    
+
+@superAdminBP.route('/department', methods=['GET'])
+def get_department():
+    try:
+        superadmin, err, status = get_authorized_superadmin()
+        if err:
+            return err, status
+        
+        department = AdminDepartment.query.filter_by(superpanel=superadmin.superadminPanel.id).first()
+        if not department:
+            return jsonify({
+                "status" : "error",
+                "message" : "No departments yet"
+            }), 200
+        
+        departmentList=[]
+        for list in department:
+            departmentList.append({
+                "id" : list.id,
+                "name" : list.name,
+            })
+
+        return jsonify({
+            "status" : "success",
+            "message" : "Fetched successfully",
+            "data" : departmentList,
+        }), 200
+    
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status" : "error",
+            "message" : "Internal Server Error",
+            "error" : str(e),
+        }), 500
+
+
+@superAdminBP.route('/userdepartment', methods=['GET'])
+def get_by_department():
+    try:
+        superadmin, err, status = get_authorized_superadmin()
+        if err:
+            return err, status
+
+        filter_department = request.args.get('department')
+
+        users = superadmin.superadminPanel.allUsers
+        if not users:
+            return jsonify({
+                "status": "error",
+                "message": "No users yet."
+            }), 400
+
+        if filter_department:
+            users = [u for u in users if u.department == filter_department]
+
+        result = [{
+            "name": u.userName,
+            "profileImage": u.profileImage,
+            "department": u.department,
+        } for u in users]
+
+        return jsonify({
+            "status": "success",
+            "total": len(result),
+            "users": result
         }), 200
 
     except Exception as e:
