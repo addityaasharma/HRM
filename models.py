@@ -381,6 +381,7 @@ class TaskManagement(db.Model):
     links = db.Column(db.JSON)
     files = db.Column(db.JSON)
     status = db.Column(db.String(120))
+    done = db.Column(db.String(120))
     comments = db.relationship('TaskComments',backref='taskmanagement', cascade='all, delete-orphan')
     users = db.relationship('TaskUser',backref='taskmanagement', cascade='all, delete-orphan')
 
