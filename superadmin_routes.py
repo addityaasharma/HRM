@@ -14,7 +14,6 @@ import re, json
 import math, holidays
 from sqlalchemy.orm import joinedload
 
-
 superAdminBP = Blueprint('superadmin',__name__, url_prefix='/superadmin')
 
 def generate_super_id_from_last(last_super_id):
@@ -2923,7 +2922,7 @@ def get_all_projects():
                 assigned_users.append({
                     "userPanelId": user.userPanelId,
                     "empId": user.user_emp_id,
-                    "userName": user.usersName,
+                    "userName": user.user_userName,
                     "image": user.image,
                     "isCompleted": user.is_completed
                 })
@@ -2997,6 +2996,90 @@ def delete_project(task_id):
         return jsonify({
             "status": "success",
             "message": "Project and all associated comments deleted successfully"
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e)
+        }), 500
+
+
+@superAdminBP.route('/project/<int:task_id>', methods=['PUT'])
+def update_project(task_id):
+    try:
+        userID = g.user.get('userID') if g.user else None
+        if not userID:
+            return jsonify({"status": "error", "message": "No auth token"}), 401
+
+        superadmin = SuperAdmin.query.filter_by(id=userID).first()
+        if not superadmin:
+            user = User.query.filter_by(id=userID).first()
+            if not user or user.userRole.lower() != 'teamlead':
+                return jsonify({"status": "error", "message": "Unauthorized"}), 403
+            superadmin = SuperAdmin.query.filter_by(superId=user.superadminId).first()
+            if not superadmin:
+                return jsonify({"status": "error", "message": "No superadmin found"}), 404
+
+        task = TaskManagement.query.filter_by(id=task_id, superpanelId=superadmin.superadminPanel.id).first()
+        if not task:
+            return jsonify({"status": "error", "message": "Task not found"}), 404
+
+        title = request.form.get('title')
+        description = request.form.get('description')
+        lastDate = request.form.get('lastDate')
+        status = request.form.get('status')
+        links = request.form.getlist('links') or []
+        files = request.form.getlist('files') or []
+        emp_ids = request.form.getlist('empIDs')  # Optional for reassignment
+
+        if title:
+            task.title = title
+        if description:
+            task.description = description
+        if lastDate:
+            try:
+                task.lastDate = datetime.fromisoformat(lastDate)
+            except ValueError:
+                return jsonify({
+                    "status": "error",
+                    "message": "Invalid date format for 'lastDate'. Use ISO format."
+                }), 400
+        if status:
+            if status.lower() not in ['ongoing', 'completed', 'incomplete']:
+                return jsonify({
+                    "status": "error",
+                    "message": "Invalid status value"
+                }), 400
+            task.status = status.lower()
+
+        task.links = links
+        task.files = files
+
+        if emp_ids:
+            TaskUser.query.filter_by(taskPanelId=task_id).delete()
+            db.session.flush()
+
+            for emp_id in emp_ids:
+                user = User.query.filter_by(empId=emp_id).first()
+                if user and user.panelData:
+                    task_user = TaskUser(
+                        taskPanelId=task.id,
+                        userPanelId=user.panelData.id,
+                        user_emp_id=user.empId,
+                        usersName=getattr(user, 'userName', 'Unknown'),
+                        image=getattr(user, 'profileImage', '')
+                    )
+                    db.session.add(task_user)
+
+        db.session.commit()
+
+        return jsonify({
+            "status": "success",
+            "message": "Task updated successfully",
+            "taskId": task.id
         }), 200
 
     except Exception as e:
