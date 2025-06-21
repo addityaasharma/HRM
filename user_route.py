@@ -800,6 +800,55 @@ def get_ticket():
         }), 500
 
 
+@user.route('/tickets', methods=['GET'])
+def get_assigned_tickets_to_user():
+    try:
+        user_id = g.user.get('userID') if g.user else None
+        if not user_id:
+            return jsonify({"status": "error", "message": "Unauthorized"}), 401
+
+        user = User.query.filter_by(id=user_id).first()
+        if not user:
+            return jsonify({"status": "error", "message": "User not found"}), 404
+
+        emp_id = user.empId
+
+        tickets = UserTicket.query.filter_by(assigned_to_empId=emp_id).order_by(UserTicket.date.desc()).all()
+
+        ticket_list = []
+        for ticket in tickets:
+            assignment = TicketAssignmentLog.query.filter_by(
+                ticket_id=ticket.id,
+                assigned_to_empId=emp_id
+            ).order_by(TicketAssignmentLog.assigned_at.desc()).first()
+
+            ticket_list.append({
+                "ticket_id": ticket.id,
+                "topic": ticket.topic,
+                "problem": ticket.problem,
+                "priority": ticket.priority,
+                "status": ticket.status,
+                "department": ticket.department,
+                "document": ticket.document,
+                "date": ticket.date.isoformat() if ticket.date else None,
+                "assigned_by": assignment.assigned_by_empId if assignment else None,
+                "assigned_at": assignment.assigned_at.isoformat() if assignment else None
+            })
+
+        return jsonify({
+            "status": "success",
+            "message": "Assigned tickets fetched successfully",
+            "data": ticket_list
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": "Internal server error",
+            "error": str(e)
+        }), 500
+
+
 @user.route('/ticket/<int:ticket_id>', methods=['PUT'])
 def editTicket(ticket_id):
     data = request.get_json()

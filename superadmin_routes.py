@@ -12,7 +12,7 @@ import random
 import string
 import re, json
 import math, holidays
-from sqlalchemy.orm import joinedload
+
 
 superAdminBP = Blueprint('superadmin',__name__, url_prefix='/superadmin')
 
@@ -2899,26 +2899,16 @@ def get_all_projects():
         if err:
             return err, status
 
-        tasks = TaskManagement.query.options(
-            joinedload(TaskManagement.users),
-            joinedload(TaskManagement.comments)
-        ).filter_by(
+        tasks = TaskManagement.query.filter_by(
             superpanelId=superadmin.superadminPanel.id
         ).order_by(TaskManagement.assignedAt.desc()).all()
 
-        grouped_tasks = {
-            "completed": [],
-            "ongoing": [],
-            "incomplete": []
-        }
-
+        task_list = []
         for task in tasks:
             assigned_users = []
             all_completed = True
-            any_assigned = False
 
             for user in task.users:
-                any_assigned = True
                 assigned_users.append({
                     "userPanelId": user.userPanelId,
                     "empId": user.user_emp_id,
@@ -2926,25 +2916,23 @@ def get_all_projects():
                     "image": user.image,
                     "isCompleted": user.is_completed
                 })
+
                 if not user.is_completed:
                     all_completed = False
 
-            if all_completed and any_assigned:
-                task_status = "completed"
-            elif not all_completed and task.lastDate and datetime.utcnow() > task.lastDate:
-                task_status = "incomplete"
-            else:
-                task_status = "ongoing"
+            task_status = "completed" if all_completed and assigned_users else "pending"
 
-            comments = [{
-                "id": c.id,
-                "userId": c.userId,
-                "username": c.username,
-                "comment": c.comments,
-                "timestamp": c.timestamp.isoformat() if hasattr(c, "timestamp") and c.timestamp else None
-            } for c in task.comments]
+            comments = []
+            for comment in task.comments:
+                comments.append({
+                    "id": comment.id,
+                    "userId": comment.userId,
+                    "username": comment.username,
+                    "comment": comment.comments,
+                    "timestamp": comment.timestamp.isoformat() if hasattr(comment, "timestamp") and comment.timestamp else None
+                })
 
-            task_data = {
+            task_list.append({
                 "id": task.id,
                 "title": task.title,
                 "description": task.description,
@@ -2955,13 +2943,11 @@ def get_all_projects():
                 "status": task_status,
                 "comments": comments,
                 "assignedUsers": assigned_users
-            }
-
-            grouped_tasks[task_status].append(task_data)
+            })
 
         return jsonify({
             "status": "success",
-            "tasks": grouped_tasks
+            "tasks": task_list
         }), 200
 
     except Exception as e:
