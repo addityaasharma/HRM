@@ -347,14 +347,14 @@ class UserPanelData(db.Model):
     # Relationships
     userPunchData = db.relationship('PunchData', backref='user_panel', lazy=True)
     userLeaveData = db.relationship('UserLeave', backref='user_panel', lazy=True)
-    userSalaryDetails = db.relationship('UserSalary', backref='user_panel', lazy=True)
+    userSalaryDetails = db.relationship('UserSalary', backref='user_panel', lazy=True)  #user will set his basic salary details
     employeeRequest = db.relationship('EmployeeRequest', backref='user_panel', lazy=True)
     userJobInfo = db.relationship('JobInfo', backref='user_panel', lazy=True)
     UserAcheivements = db.relationship('UserAcheivements', backref='user_panel', lazy=True)
     UserHolidays = db.relationship('UserHoliday', backref='user_panel', lazy=True)
     UserTicket = db.relationship('UserTicket', backref='user_panel', lazy=True)
     UserDocuments = db.relationship('UserDocument', backref='user_panel', lazy=True)
-    UserSalary = db.relationship('UserSalaryDetails', backref='user_panel', lazy=True)
+    UserSalary = db.relationship('UserSalaryDetails', backref='user_panel', lazy=True)    #admin will post the salary 
     UserMessage = db.relationship('UserChat', backref='user_panel', lazy=True)
     MyTasks = db.relationship('TaskUser', backref='user_panel', lazy=True)
     MyAssets = db.relationship('ProductAsset', backref='user_panel', lazy=True)

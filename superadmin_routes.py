@@ -7,11 +7,15 @@ from config import cloudinary
 from sqlalchemy import desc
 from dateutil import parser
 import cloudinary.uploader
-from datetime import datetime
+from datetime import datetime, timedelta
 import random
 import string
 import re, json
 import math, holidays
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 superAdminBP = Blueprint('superadmin',__name__, url_prefix='/superadmin')
@@ -83,6 +87,10 @@ def get_authorized_superadmin(required_section=None, required_permissions=None):
 
     return superadmin, None, None
 
+def serialize_date(obj):
+    if isinstance(obj, (datetime, date)):
+        return obj.isoformat()
+    return obj
 
 # ====================================
 #         SUPERADMIN SECTION          
@@ -2920,7 +2928,7 @@ def get_all_projects():
                 if not user.is_completed:
                     all_completed = False
 
-            task_status = "completed" if all_completed and assigned_users else "pending"
+            task_status = task.status
 
             comments = []
             for comment in task.comments:
@@ -3579,3 +3587,85 @@ def get_departments_with_users():
             "message": "Internal Server Error",
             "error": str(e),
         }), 500
+
+
+
+# ====================================
+#      SALARY SECTION           
+# ====================================
+
+@superAdminBP.route('/salary/<emp_id>', methods=['GET'])
+def get_salary_summary(emp_id):
+    try:
+        superadmin, err, status = get_authorized_superadmin()
+        if err:
+            return err, status
+
+        target_user = User.query.filter_by(empId=emp_id).first()
+        if not target_user:
+            return jsonify({'error': 'User not found'}), 404
+
+        user_panel = UserPanelData.query.filter_by(userPersonalData=target_user.id).first()
+        if not user_panel:
+            return jsonify({'error': 'User panel not found'}), 404
+
+        current_month = datetime.now().replace(day=1)
+        next_month = (current_month + timedelta(days=32)).replace(day=1)
+
+        punch_data = PunchData.query.filter(
+            PunchData.panelData == user_panel.id,
+            PunchData.login >= current_month,
+            PunchData.login < next_month
+        ).all()
+
+        leave_data = UserLeave.query.filter(
+            UserLeave.panelData == user_panel.id,
+            UserLeave.leavefrom >= current_month,
+            UserLeave.leavefrom < next_month
+        ).all()
+
+        payroll_policy = PayrollPolicy.query.filter_by(
+            superpanel=target_user.superadmin_panel_id
+        ).first()
+
+        base_salary = float(getattr(target_user, 'baseSalary', 0))
+        per_day_salary = base_salary / 30 if base_salary else 0
+
+        total_working_days = len(punch_data)
+        present_days = len([p for p in punch_data if p.status == 'present'])
+        absent_days = len([p for p in punch_data if p.status == 'absent'])
+
+        unpaid_leave_days = sum([l.unpaidDays or 0 for l in leave_data if l.status == 'approved'])
+
+        gross_pay = per_day_salary * present_days
+        unpaid_deductions = per_day_salary * unpaid_leave_days
+        final_salary = gross_pay - unpaid_deductions
+
+        summary = {
+            'empId': emp_id,
+            'userName': target_user.userName,
+            'department': target_user.department,
+            'currentMonth': current_month.strftime('%B %Y'),
+            'baseSalary': base_salary,
+            'perDaySalary': round(per_day_salary, 2),
+            'grossPay': round(gross_pay, 2),
+            'unpaidDeductions': round(unpaid_deductions, 2),
+            'finalSalary': round(final_salary, 2),
+            'workingDays': total_working_days,
+            'presentDays': present_days,
+            'absentDays': absent_days,
+            'unpaidLeaveDays': unpaid_leave_days,
+            'policyDetails': {
+                'policyName': payroll_policy.policyname if payroll_policy else None,
+                'pfDeduction': payroll_policy.pfDeduction if payroll_policy else None,
+                'overtimePolicy': payroll_policy.overtimePolicy if payroll_policy else None,
+                'disbursement': serialize_date(payroll_policy.disbursement) if payroll_policy else None
+            }
+        }
+
+        return jsonify(summary), 200
+
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error generating salary summary: {str(e)}")
+        return jsonify({"status": "error", "message": "Internal server error", "error": str(e)}), 500

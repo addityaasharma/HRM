@@ -1334,18 +1334,25 @@ def request_leave():
         if not user:
             return jsonify({"status": "error", "message": "Invalid user"}), 404
 
+        # Get superadmin via superId
         superadmin = SuperAdmin.query.filter_by(superId=user.superadminId).first()
         if not superadmin:
-            return jsonify({"status": "error", "message": "Leave policy not set by admin"}), 409
+            return jsonify({"status": "error", "message": "Admin not found"}), 409
 
-        # FIX: Check if adminLeave list exists and is not empty
         if not hasattr(superadmin.superadminPanel, 'adminLeave') or not superadmin.superadminPanel.adminLeave:
             return jsonify({'status': "error", "message": "Admin has not configured any leave policies"}), 404
-        
-        adminLeaveDetails = superadmin.superadminPanel.adminLeave[0]
-        print(adminLeaveDetails)
 
-        # Date parsing
+        # Match policy based on leavetype
+        leavetype = data['leavetype']
+        adminLeaveDetails = next((
+            policy for policy in superadmin.superadminPanel.adminLeave
+            if policy.leavetype.lower() == leavetype.lower()
+        ), None)
+
+        if not adminLeaveDetails:
+            return jsonify({"status": "error", "message": f"No policy found for leave type '{leavetype}'"}), 404
+
+        # Parse leave dates
         leaveStart = datetime.strptime(data['leavefrom'], "%Y-%m-%d").date()
         leaveEnd = datetime.strptime(data['leaveto'], "%Y-%m-%d").date()
         totalDays = (leaveEnd - leaveStart).days + 1
@@ -1355,14 +1362,12 @@ def request_leave():
         currentYear = today.year
         unpaidDays = 0
 
-        # -------- Condition 1: Probation --------
-        if adminLeaveDetails.probation:
-                if not user.duration:
-                    return jsonify({"status": "error", "message": "User resignation date not set"}), 400
-                if (user.duration - today).days <= 30:
-                    return jsonify({"status": "error", "message": "You can't apply for leave within 1 month of resignation"}), 403
+        # --- Probation ---
+        if adminLeaveDetails.probation and user.duration:
+            if (user.duration - today).days <= 30:
+                return jsonify({"status": "error", "message": "You can't apply for leave within 1 month of resignation"}), 403
 
-        # -------- Condition 2: Lapse Policy --------
+        # --- Lapse Policy ---
         previousYearLeaves = 0
         if not adminLeaveDetails.lapse_policy:
             previousYearLeaves = db.session.query(func.sum(UserLeave.days)).filter(
@@ -1371,9 +1376,9 @@ def request_leave():
                 UserLeave.from_date.between(f'{currentYear - 1}-01-01', f'{currentYear - 1}-12-31')
             ).scalar() or 0
 
-        # -------- Condition 3: Calculation Type --------
+        # --- Calculation Type Range ---
         calc_type = adminLeaveDetails.calculationType
-        start_range, end_range = None, None
+        start_range, end_range, prev_start, prev_end = None, None, None, None
 
         if calc_type == 'monthly':
             start_range = today.replace(day=1)
@@ -1382,23 +1387,18 @@ def request_leave():
             else:
                 end_range = (today.replace(month=currentMonth + 1, day=1) - timedelta(days=1))
 
-            prev_start = (today.replace(day=1) - timedelta(days=1)).replace(day=1)
-            prev_end = prev_start.replace(day=28) + timedelta(days=4)
-            prev_end = prev_end - timedelta(days=prev_end.day)
+            prev_start = (start_range - timedelta(days=1)).replace(day=1)
+            prev_end = start_range - timedelta(days=1)
 
         elif calc_type == 'quarterly':
             start_month = 1 + 3 * ((currentMonth - 1) // 3)
             end_month = start_month + 2
             start_range = datetime(currentYear, start_month, 1).date()
-            if end_month == 12:
-                end_range = datetime(currentYear, 12, 31).date()
-            else:
-                end_range = (datetime(currentYear, end_month + 1, 1) - timedelta(days=1)).date()
-
+            end_range = datetime(currentYear, end_month + 1, 1).date() - timedelta(days=1)
             prev_start_month = start_month - 3 if start_month > 3 else 10
             prev_year = currentYear if start_month > 3 else currentYear - 1
             prev_start = datetime(prev_year, prev_start_month, 1).date()
-            prev_end = (datetime(prev_year, prev_start_month + 3, 1) - timedelta(days=1)) if prev_start_month < 10 else datetime(prev_year, 12, 31).date()
+            prev_end = datetime(prev_year, prev_start_month + 3, 1).date() - timedelta(days=1)
 
         elif calc_type == 'yearly':
             start_range = datetime(currentYear, 1, 1).date()
@@ -1406,7 +1406,7 @@ def request_leave():
             prev_start = datetime(currentYear - 1, 1, 1).date()
             prev_end = datetime(currentYear - 1, 12, 31).date()
 
-        # -------- Carryforward Logic --------
+        # --- Carryforward ---
         carried_forward = 0
         if adminLeaveDetails.carryforward:
             prev_taken = db.session.query(func.sum(UserLeave.days)).filter(
@@ -1422,10 +1422,9 @@ def request_leave():
             if calc_type == 'yearly':
                 prev_allowance = adminLeaveDetails.max_leave_year
 
-            unused = max(prev_allowance - prev_taken, 0)
-            carried_forward = unused
+            carried_forward = max(prev_allowance - prev_taken, 0)
 
-        # -------- Leave Taken in Current Cycle --------
+        # --- Current Cycle Taken ---
         cycle_taken = db.session.query(func.sum(UserLeave.days)).filter(
             UserLeave.empId == data['empId'],
             UserLeave.status == 'approved',
@@ -1443,34 +1442,27 @@ def request_leave():
         if cycle_taken + totalDays > total_available:
             unpaidDays += (cycle_taken + totalDays) - total_available
 
-        # -------- NEW CONDITION: Monthly Leave Limit with Carryover --------
+        # --- Monthly Limit (if exists) ---
         if hasattr(adminLeaveDetails, 'monthly_leave_limit') and adminLeaveDetails.monthly_leave_limit:
-            monthly_limit = adminLeaveDetails.monthly_leave_limit  # e.g., 2 leaves per month
-            
-            # Calculate current month range based on leave start date, not today's date
+            monthly_limit = adminLeaveDetails.monthly_leave_limit
             leave_month = leaveStart.month
             leave_year = leaveStart.year
-            
             current_month_start = datetime(leave_year, leave_month, 1).date()
-            if leave_month == 12:
-                current_month_end = datetime(leave_year, 12, 31).date()
-            else:
-                current_month_end = (datetime(leave_year, leave_month + 1, 1) - timedelta(days=1)).date()
-            
-            # Calculate previous month range
-            if leave_month == 1:
-                prev_month_start = datetime(leave_year - 1, 12, 1).date()
-                prev_month_end = datetime(leave_year - 1, 12, 31).date()
-            else:
-                prev_month_start = datetime(leave_year, leave_month - 1, 1).date()
-                if leave_month - 1 == 2:  # February
-                    prev_month_end = datetime(leave_year, leave_month - 1, 28).date()
-                    if leave_year % 4 == 0 and (leave_year % 100 != 0 or leave_year % 400 == 0):
-                        prev_month_end = datetime(leave_year, leave_month - 1, 29).date()
-                else:
-                    prev_month_end = (datetime(leave_year, leave_month, 1) - timedelta(days=1)).date()
-            
-            # Get current month PAID leaves taken (approved leaves only)
+            current_month_end = (
+                datetime(leave_year, leave_month + 1, 1) - timedelta(days=1)
+                if leave_month < 12 else datetime(leave_year, 12, 31).date()
+            )
+
+            prev_month_start = (
+                datetime(leave_year - 1, 12, 1).date() if leave_month == 1
+                else datetime(leave_year, leave_month - 1, 1).date()
+            )
+            prev_month_end = (
+                datetime(leave_year - 1, 12, 31).date() if leave_month == 1
+                else datetime(leave_year, leave_month, 1).date() - timedelta(days=1)
+            )
+
+            # Paid leaves in current month
             current_month_leaves = db.session.query(UserLeave.days, UserLeave.unpaidDays).filter(
                 UserLeave.empId == data['empId'],
                 UserLeave.status == 'approved',
@@ -1479,13 +1471,10 @@ def request_leave():
                     UserLeave.leavefrom <= current_month_end
                 )
             ).all()
-            
-            current_month_paid_taken = 0
-            for leave_days, unpaid_days in current_month_leaves:
-                paid_days = leave_days - (unpaid_days or 0)
-                current_month_paid_taken += paid_days
-            
-            # Get previous month leaves taken
+
+            current_month_paid = sum(days - (unpaid or 0) for days, unpaid in current_month_leaves)
+
+            # Previous unused
             prev_month_taken = db.session.query(func.sum(UserLeave.days)).filter(
                 UserLeave.empId == data['empId'],
                 UserLeave.status == 'approved',
@@ -1494,38 +1483,20 @@ def request_leave():
                     UserLeave.leavefrom <= prev_month_end
                 )
             ).scalar() or 0
-            
-            # Calculate available monthly leaves with carryover
-            prev_month_unused = max(monthly_limit - prev_month_taken, 0)
-            total_monthly_available = monthly_limit + prev_month_unused
-            
-            # Debug prints
-            print(f"Monthly Limit Debug:")
-            print(f"Monthly limit: {monthly_limit}")
-            print(f"Current month PAID taken: {current_month_paid_taken}")
-            print(f"Previous month taken: {prev_month_taken}")
-            print(f"Previous month unused: {prev_month_unused}")
-            print(f"Total monthly available: {total_monthly_available}")
-            print(f"Current request days: {totalDays}")
-            
-            # Calculate monthly unpaid days
-            if current_month_paid_taken >= total_monthly_available:
-                # User has already exhausted monthly limit - ALL current leave days are unpaid
-                monthly_unpaid = totalDays
-                print(f"Case 1: All days unpaid = {monthly_unpaid}")
-            elif current_month_paid_taken + totalDays > total_monthly_available:
-                # User will exceed monthly limit with this request
-                monthly_unpaid = (current_month_paid_taken + totalDays) - total_monthly_available
-                print(f"Case 2: Partial unpaid = {monthly_unpaid}")
-            else:
-                # User is within monthly limit
-                monthly_unpaid = 0
-                print(f"Case 3: No unpaid days = {monthly_unpaid}")
-            
-            unpaidDays = max(unpaidDays, monthly_unpaid)
-            print(f"Final unpaid days: {unpaidDays}")
 
-        # -------- Condition 4: Max Leave in Year --------
+            prev_unused = max(monthly_limit - prev_month_taken, 0)
+            monthly_available = monthly_limit + prev_unused
+
+            if current_month_paid >= monthly_available:
+                monthly_unpaid = totalDays
+            elif current_month_paid + totalDays > monthly_available:
+                monthly_unpaid = (current_month_paid + totalDays) - monthly_available
+            else:
+                monthly_unpaid = 0
+
+            unpaidDays = max(unpaidDays, monthly_unpaid)
+
+        # --- Max Leave per Year ---
         yearlyLeaveTaken = db.session.query(func.sum(UserLeave.days)).filter(
             UserLeave.empId == user.empId,
             UserLeave.status == 'approved',
@@ -1536,11 +1507,10 @@ def request_leave():
             yearly_unpaid = (yearlyLeaveTaken + totalDays) - adminLeaveDetails.max_leave_year
             unpaidDays = max(unpaidDays, yearly_unpaid)
 
-        # -------- Save User Leave Request --------
         newLeave = UserLeave(
             panelData=user.panelData.id,
             empId=data['empId'],
-            leavetype=data['leavetype'],
+            leavetype=leavetype,
             leavefrom=leaveStart,
             leaveto=leaveEnd,
             reason=data['reason'],
@@ -1548,13 +1518,13 @@ def request_leave():
             email=user.email,
             days=totalDays,
             status='pending',
-            unpaidDays=max(unpaidDays, 0),
+            unpaidDays=unpaidDays
         )
 
         db.session.add(newLeave)
         db.session.commit()
 
-        return jsonify({"status": "success", "message": "Leave Sent Successfully"}), 200
+        return jsonify({"status": "success", "message": "Leave request submitted"}), 200
 
     except Exception as e:
         db.session.rollback()
@@ -2301,11 +2271,7 @@ def get_user_tasks_with_chat():
         assigned_tasks = TaskUser.query.options(joinedload(TaskUser.taskmanagement)) \
             .filter_by(user_emp_id=user.empId).all()
 
-        grouped_tasks = {
-            "ongoing": [],
-            "completed": [],
-            "incomplete": []
-        }
+        task_list = []
 
         for assigned in assigned_tasks:
             task = assigned.taskmanagement
@@ -2338,17 +2304,12 @@ def get_user_tasks_with_chat():
                 "chat": chat
             }
 
-            if task.status == "completed":
-                grouped_tasks["completed"].append(task_data)
-            elif task.status == "incomplete":
-                grouped_tasks["incomplete"].append(task_data)
-            else:
-                grouped_tasks["ongoing"].append(task_data)
+            task_list.append(task_data)
 
         return jsonify({
             "status": "success",
             "message": "Tasks fetched successfully",
-            "data": grouped_tasks
+            "data": task_list
         }), 200
 
     except Exception as e:
@@ -2374,10 +2335,18 @@ def update_task_status_and_comment(task_id):
         comment_text = data.get('comment')
         mark_complete = data.get('mark_complete', False)
 
-        task_user = TaskUser.query.filter_by(taskPanelId=task_id, userPanelId=user.panelData.id).first()
-        if not task_user:
-            return jsonify({"status": "error", "message": "Task not assigned to this user"}), 403
+        task_user = TaskUser.query.filter_by(
+            taskPanelId=task_id,
+            userPanelId=user.panelData.id
+        ).first()
 
+        if not task_user:
+            return jsonify({
+                "status": "error",
+                "message": "Task not assigned to this user"
+            }), 403
+
+        # Add new comment if provided
         if comment_text:
             new_comment = TaskComments(
                 taskPanelId=task_id,
@@ -2388,23 +2357,23 @@ def update_task_status_and_comment(task_id):
             )
             db.session.add(new_comment)
 
+        # Mark task as completed by user
         if mark_complete:
             task_user.is_completed = True
 
-        db.session.flush()
+        db.session.flush()  # Ensure task_user changes reflect before querying task status
 
         task = TaskManagement.query.get(task_id)
         if task:
-            all_assigned = TaskUser.query.filter_by(taskPanelId=task_id).all()
-            all_completed = all(user_task.is_completed for user_task in all_assigned)
+            all_assigned_users = TaskUser.query.filter_by(taskPanelId=task_id).all()
+            all_completed = all(tu.is_completed for tu in all_assigned_users)
 
             if all_completed:
                 task.status = "completed"
+            elif task.lastDate and datetime.utcnow() > task.lastDate:
+                task.status = "incomplete"
             else:
-                if task.lastDate and datetime.utcnow() > task.lastDate:
-                    task.status = "incomplete"
-                else:
-                    task.status = "ongoing"
+                task.status = "ongoing"
 
         db.session.commit()
 
