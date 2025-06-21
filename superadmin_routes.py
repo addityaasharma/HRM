@@ -3729,31 +3729,52 @@ def update_asset_status(asset_id):
 def add_department():
     try:
         data = request.get_json()
-        if not data:
+        if not data or not data.get('name'):
             return jsonify({
-                "status" : "error",
-                "message" : "No data"
+                "status": "error",
+                "message": "Department name is required"
             }), 400
-        
+
         superadmin, err, status = get_authorized_superadmin()
         if err:
             return err, status
-        
+
+        existing_department = AdminDepartment.query.filter_by(
+            name=data['name'].strip(),
+            superpanel=superadmin.superadminPanel.id
+        ).first()
+
+        if existing_department:
+            return jsonify({
+                "status": "error",
+                "message": "Department with this name already exists"
+            }), 409
+
         department = AdminDepartment(
-            superpanel = superadmin.superadminPanel.id,
-            name = data['name']
+            superpanel=superadmin.superadminPanel.id,
+            name=data['name'].strip()
         )
 
         db.session.add(department)
         db.session.commit()
 
+        return jsonify({
+            "status": "success",
+            "message": "Department added successfully",
+            "department": {
+                "id": department.id,
+                "name": department.name
+            }
+        }), 201
+
     except Exception as e:
         db.session.rollback()
         return jsonify({
-            "status" : "error",
-            "message" : "Internal Server Error",
-            "error" : str(e)
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e)
         }), 500
+
     
 
 @superAdminBP.route('/department', methods=['GET'])
