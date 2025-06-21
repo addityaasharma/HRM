@@ -1,4 +1,4 @@
-from models import User,UserPanelData,db,SuperAdmin,PunchData, UserTicket, UserDocument, UserChat, UserLeave, ShiftTimeManagement, Announcement, Likes, Comments, Notice, ProductAsset, TaskUser ,TaskComments, TaskManagement
+from models import User,UserPanelData,db,SuperAdmin,PunchData, UserTicket, UserDocument, UserChat, UserLeave, ShiftTimeManagement, Announcement, Likes, Comments, Notice, ProductAsset, TaskUser ,TaskComments, TaskManagement, TicketAssignmentLog
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask import Blueprint, request, json, jsonify, g
 from datetime import datetime,time, timedelta
@@ -13,6 +13,7 @@ import cloudinary.uploader
 from redis import Redis
 import random,os
 import string, math
+from sqlalchemy.orm import joinedload
 
 
 user = Blueprint('user',__name__, url_prefix='/user')
@@ -706,27 +707,45 @@ def get_ticket():
 
         user = User.query.filter_by(id=userID).first()
         if not user:
-            return jsonify({"status": "error", "message": "No user found with this ID"}), 400
+            return jsonify({"status": "error", "message": "User not found"}), 400
 
         panel_data = user.panelData
-        if not panel_data:
-            return jsonify({"status": "error", "message": "User panel data not found"}), 404
+        if not panel_data or not panel_data.UserTicket:
+            return jsonify({"status": "error", "message": "No tickets found"}), 404
 
         page = int(request.args.get('page', 1))
         limit = int(request.args.get('limit', 10))
         offset = (page - 1) * limit
 
-        all_tickets = panel_data.UserTicket
-        total_tickets = len(all_tickets)
-        paginated_tickets = all_tickets[offset:offset + limit]
+        department_filter = request.args.get('department', '').strip().lower()
+        status_filter = request.args.get('status', '').strip().lower()
+        priority_filter = request.args.get('priority', '').strip().lower()
 
-        if not paginated_tickets:
-            return jsonify({"status": "error", "message": "No tickets found on this page"}), 404
+        filtered_tickets = []
+        for ticket in panel_data.UserTicket:
+            if department_filter and ticket.department.lower() != department_filter:
+                continue
+            if status_filter and ticket.status.lower() != status_filter:
+                continue
+            if priority_filter and ticket.priority.lower() != priority_filter:
+                continue
+            filtered_tickets.append(ticket)
+
+        total_tickets = len(filtered_tickets)
+        total_pages = (total_tickets + limit - 1) // limit
+
+        paginated_tickets = filtered_tickets[offset:offset + limit]
 
         ticket_list = []
         for ticket in paginated_tickets:
+            logs = [{
+                "assigned_by": log.assigned_by_empId,
+                "assigned_to": log.assigned_to_empId,
+                "assigned_at": log.assigned_at.isoformat() if log.assigned_at else None
+            } for log in ticket.assignment_logs]
+
             ticket_list.append({
-                "id": ticket.id,
+                "ticket_id": ticket.id,
                 "userName": ticket.userName,
                 "userId": ticket.userId,
                 "date": ticket.date.isoformat() if ticket.date else None,
@@ -735,17 +754,41 @@ def get_ticket():
                 "priority": ticket.priority,
                 "department": ticket.department,
                 "document": ticket.document,
-                "status": ticket.status or 'pending'
+                "status": ticket.status or 'pending',
+                "assigned_to_empId": ticket.assigned_to_empId,
+                "logs": logs
             })
+
+        unique_departments = sorted(list(set([t.department for t in panel_data.UserTicket if t.department])))
+        unique_statuses = sorted(list(set([t.status for t in panel_data.UserTicket if t.status])))
+        unique_priorities = sorted(list(set([t.priority for t in panel_data.UserTicket if t.priority])))
 
         return jsonify({
             "status": "success",
-            "total": total_tickets,
-            "page": page,
-            "limit": limit,
-            "total_pages": (page + total_tickets - 1),
             "message": "Fetched successfully",
-            "data": ticket_list,
+            "pagination": {
+                "current_page": page,
+                "limit": limit,
+                "total_tickets": total_tickets,
+                "total_pages": total_pages,
+                "has_next": page < total_pages,
+                "has_prev": page > 1,
+                "next_page": page + 1 if page < total_pages else None,
+                "prev_page": page - 1 if page > 1 else None
+            },
+            "filters": {
+                "applied": {
+                    "department": department_filter or None,
+                    "status": status_filter or None,
+                    "priority": priority_filter or None
+                },
+                "available": {
+                    "departments": unique_departments,
+                    "statuses": unique_statuses,
+                    "priorities": unique_priorities
+                }
+            },
+            "data": ticket_list
         }), 200
 
     except Exception as e:
@@ -756,6 +799,74 @@ def get_ticket():
             "error": str(e)
         }), 500
 
+
+@user.route('/ticket/<int:ticket_id>', methods=['PUT'])
+def editTicket(ticket_id):
+    data = request.get_json()
+    if not data:
+        return jsonify({
+            'status': "error",
+            'message': "No data provided",
+        }), 400
+
+    try:
+        userID = g.user.get('userID') if g.user else None
+        if not userID:
+            return jsonify({'status': 'error', 'message': 'No auth or user found'}), 400
+
+        user = User.query.filter_by(id=userID).first()
+        if not user:
+            return jsonify({'status': 'error', 'message': 'User not found'}), 404
+
+        ticket = UserTicket.query.filter_by(id=ticket_id).first()
+        if not ticket:
+            return jsonify({'status': 'error', 'message': 'Ticket not found'}), 404
+
+        if ticket.userId != user.id and ticket.assigned_to_empId != user.empId:
+            return jsonify({
+                'status': 'error',
+                'message': 'You are not authorized to update this ticket'
+            }), 403
+
+        if 'status' in data:
+            ticket.status = data['status']
+        if 'problem' in data:
+            ticket.problem = data['problem']
+
+        if 'assign_to_empId' in data:
+            new_assignee_empId = data['assign_to_empId']
+
+            if ticket.assigned_to_empId != new_assignee_empId:
+                new_user = User.query.filter_by(empId=new_assignee_empId).first()
+                if not new_user:
+                    return jsonify({'status': 'error', 'message': 'Target user with empId not found'}), 404
+
+                log = TicketAssignmentLog(
+                    ticket_id=ticket.id,
+                    assigned_by_empId=user.empId,
+                    assigned_to_empId=new_assignee_empId
+                )
+                db.session.add(log)
+
+                ticket.assigned_to_empId = new_assignee_empId
+
+        db.session.commit()
+
+        return jsonify({
+            'status': 'success',
+            'message': 'Ticket updated successfully',
+            'ticket_id': ticket.id,
+            'new_status': ticket.status,
+            'assigned_to': ticket.assigned_to_empId
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            'status': "error",
+            'message': "Internal Server Error",
+            'error': str(e)
+        }), 500
 
 # ====================================
 #        USER DOCUMENTS SECTION
@@ -2138,40 +2249,57 @@ def get_user_tasks_with_chat():
         if not user or not user.panelData:
             return jsonify({"status": "error", "message": "User or panel not found"}), 404
 
-        assigned_tasks = TaskUser.query.filter_by(userPanelId=user.panelData.id).all()
+        assigned_tasks = TaskUser.query.options(joinedload(TaskUser.taskmanagement)) \
+            .filter_by(user_emp_id=user.empId).all()
 
-        task_list = []
+        grouped_tasks = {
+            "ongoing": [],
+            "completed": [],
+            "incomplete": []
+        }
+
         for assigned in assigned_tasks:
             task = assigned.taskmanagement
+            if not task:
+                continue
 
-            # Fetch comments (chat)
-            task_comments = TaskComments.query.filter_by(taskPanelId=task.id).all()
-            chat = []
-            for c in task_comments:
-                chat.append({
-                    "id": c.id,
-                    "userId": c.userId,
-                    "username": c.username,
-                    "comment": c.comments
-                })
+            task_comments = TaskComments.query \
+                .filter_by(taskPanelId=task.id) \
+                .order_by(TaskComments.id.desc()) \
+                .all()
 
-            task_list.append({
+            chat = [{
+                "id": c.id,
+                "userId": c.userId,
+                "username": c.username,
+                "comment": c.comments,
+                "timestamp": c.created_at.isoformat() if hasattr(c, 'created_at') else None
+            } for c in task_comments]
+
+            task_data = {
                 "task_id": task.id,
                 "title": task.title,
                 "description": task.description,
-                "assignedAt": task.assignedAt.strftime('%Y-%m-%d %H:%M:%S'),
-                "lastDate": task.lastDate.strftime('%Y-%m-%d'),
+                "assignedAt": task.assignedAt.isoformat() if task.assignedAt else None,
+                "lastDate": task.lastDate.isoformat() if task.lastDate else None,
                 "status": task.status,
-                "links": task.links,
-                "files": task.files,
+                "links": task.links or [],
+                "files": task.files or [],
                 "is_completed": assigned.is_completed,
-                "chat": chat  # 👈 All related comments
-            })
+                "chat": chat
+            }
+
+            if task.status == "completed":
+                grouped_tasks["completed"].append(task_data)
+            elif task.status == "incomplete":
+                grouped_tasks["incomplete"].append(task_data)
+            else:
+                grouped_tasks["ongoing"].append(task_data)
 
         return jsonify({
             "status": "success",
-            "message": "Assigned tasks with chat fetched successfully",
-            "data": task_list
+            "message": "Tasks fetched successfully",
+            "data": grouped_tasks
         }), 200
 
     except Exception as e:
@@ -2182,7 +2310,7 @@ def get_user_tasks_with_chat():
         }), 500
 
 
-@user.route('/task/<int:task_id>/update', methods=['PUT'])
+@user.route('/project/<int:task_id>', methods=['PUT'])
 def update_task_status_and_comment(task_id):
     try:
         userId = g.user.get('userID') if g.user else None
@@ -2216,17 +2344,26 @@ def update_task_status_and_comment(task_id):
 
         db.session.flush()
 
-        all_assigned = TaskUser.query.filter_by(taskPanelId=task_id).all()
-        if all(user_task.is_completed for user_task in all_assigned):
-            task = TaskManagement.query.get(task_id)
-            if task:
+        task = TaskManagement.query.get(task_id)
+        if task:
+            all_assigned = TaskUser.query.filter_by(taskPanelId=task_id).all()
+            all_completed = all(user_task.is_completed for user_task in all_assigned)
+
+            if all_completed:
                 task.status = "completed"
+            else:
+                if task.lastDate and datetime.utcnow() > task.lastDate:
+                    task.status = "incomplete"
+                else:
+                    task.status = "ongoing"
 
         db.session.commit()
 
         return jsonify({
             "status": "success",
-            "message": "Task updated successfully"
+            "message": "Task updated successfully",
+            "task_status": task.status,
+            "user_completed": task_user.is_completed
         }), 200
 
     except Exception as e:
