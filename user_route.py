@@ -871,17 +871,19 @@ def editTicket(ticket_id):
         if not ticket:
             return jsonify({'status': 'error', 'message': 'Ticket not found'}), 404
 
-        if ticket.userId != user.id and ticket.assigned_to_empId != user.empId:
+        if ticket.userId != str(user.id) and ticket.assigned_to_empId != user.empId:
             return jsonify({
                 'status': 'error',
                 'message': 'You are not authorized to update this ticket'
             }), 403
 
+        # Update ticket fields if present
         if 'status' in data:
             ticket.status = data['status']
         if 'problem' in data:
             ticket.problem = data['problem']
 
+        # Assignment change
         if 'assign_to_empId' in data:
             new_assignee_empId = data['assign_to_empId']
 
@@ -890,6 +892,7 @@ def editTicket(ticket_id):
                 if not new_user:
                     return jsonify({'status': 'error', 'message': 'Target user with empId not found'}), 404
 
+                # Log the assignment
                 log = TicketAssignmentLog(
                     ticket_id=ticket.id,
                     assigned_by_empId=user.empId,
@@ -897,6 +900,7 @@ def editTicket(ticket_id):
                 )
                 db.session.add(log)
 
+                # Update assignment
                 ticket.assigned_to_empId = new_assignee_empId
 
         db.session.commit()
