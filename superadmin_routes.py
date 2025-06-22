@@ -3623,8 +3623,8 @@ def get_all_user_admin_data():
             if panel_data:
                 punch_count = db.session.query(PunchData).filter(
                     PunchData.panelData == panel_data.id,
-                    PunchData.date >= month_start,
-                    PunchData.date <= month_end
+                    PunchData.login >= month_start,
+                    PunchData.login <= month_end
                 ).count()
 
             # --- Leave details this month ---
