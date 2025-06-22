@@ -87,10 +87,7 @@ def get_authorized_superadmin(required_section=None, required_permissions=None):
 
     return superadmin, None, None
 
-def serialize_date(obj):
-    if isinstance(obj, (datetime, date)):
-        return obj.isoformat()
-    return obj
+
 
 # ====================================
 #         SUPERADMIN SECTION          
@@ -1842,9 +1839,16 @@ def delete_announcement(id):
 @superAdminBP.route('/announcement', methods=['GET'])
 def get_announcement():
     try:
-        superadmin, err, status = get_authorized_superadmin()
+        superadmin, err, status = get_authorized_superadmin(
+            required_section="announcement",
+            required_permissions="view"
+        )
         if err:
             return err, status
+
+        userID = g.user.get('userID') if g.user else None
+        if not userID:
+            return jsonify({"status": "error", "message": "No user token found"}), 401
 
         allAnnouncement = superadmin.superadminPanel.adminAnnouncement
 
@@ -1887,8 +1891,8 @@ def get_announcement():
                         {"text": ann.poll_option_2, "votes": ann.votes_option_2},
                         {"text": ann.poll_option_3, "votes": ann.votes_option_3},
                         {"text": ann.poll_option_4, "votes": ann.votes_option_4}
-                    ] if ann.poll_question else None
-                }
+                    ]
+                } if ann.poll_question else None
             })
 
         return jsonify({

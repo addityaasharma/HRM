@@ -1346,7 +1346,7 @@ def request_leave():
         leavetype = data['leavetype']
         adminLeaveDetails = next((
             policy for policy in superadmin.superadminPanel.adminLeave
-            if policy.leavetype.lower() == leavetype.lower()
+            if policy.leaveType.lower() == leavetype.lower()
         ), None)
 
         if not adminLeaveDetails:
