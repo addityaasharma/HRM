@@ -3674,26 +3674,37 @@ def get_all_user_admin_data():
         admin_panel = superadmin.superadminPanel
 
         bonus_policy = [{
-            "title": b.title,
+            "bonus_name": b.bonus_name,
             "amount": b.amount,
-            "bonus_type": b.bonus_type,
-            "created_at": b.created_at.isoformat()
+            "bonus_method": b.bonus_method,
+            "apply": b.apply,
+            "employeement_type": b.employeement_type,
+            "department_type": b.department_type
         } for b in admin_panel.adminBonusPolicy]
 
         payroll_policy = [{
-            "component": p.component,
-            "amount": p.amount,
-            "type": p.pay_type,
-            "created_at": p.created_at.isoformat()
+            "policyname": p.policyname,
+            "calculation_method": p.calculation_method,
+            "overtimePolicy": p.overtimePolicy,
+            "perhour": p.perhour,
+            "pfDeduction": p.pfDeduction,
+            "salaryHoldCondition": p.salaryHoldCondition,
+            "disbursement": p.disbursement.isoformat() if p.disbursement else None,
+            "employeementType": p.employeementType,
+            "departmentType": p.departmentType
         } for p in admin_panel.adminPayrollPolicy]
 
         leave_policy = [{
+            "leaveName": l.leaveName,
+            "leaveType": l.leaveType,
+            "probation": l.probation,
+            "lapse_policy": l.lapse_policy,
             "calculationType": l.calculationType,
+            "day_type": l.day_type,
+            "encashment": l.encashment,
             "carryforward": l.carryforward,
             "max_leave_once": l.max_leave_once,
             "max_leave_year": l.max_leave_year,
-            "probation": l.probation,
-            "lapse_policy": l.lapse_policy,
             "monthly_leave_limit": l.monthly_leave_limit
         } for l in admin_panel.adminLeave]
 
