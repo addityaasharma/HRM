@@ -33,7 +33,7 @@ class SuperAdmin(db.Model):
     company_estabilish = db.Column(db.DateTime)
     company_years = db.Column(db.Integer)
     is_super_admin = db.Column(db.Boolean)
-    # master_id = db.Column(db.Integer, db.ForeignKey('master.id'), nullable=True)
+    # master_id = db.Column(db.Integer, db.ForeignKey('master.id'), nullable=False)
     superadminPanel = db.relationship('SuperAdminPanel', backref='superadmin', uselist=False, lazy=True)  #superadmin panel
 
 

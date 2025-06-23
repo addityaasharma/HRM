@@ -4146,6 +4146,79 @@ def delete_promotion(promotion_id):
 #      ADMIN MESSAGE SECTION         - admin will chat with users  
 # ====================================
 
+@superAdminBP.route('/message_users/<int:id>', methods=['GET'])
+def get_message_users(id):
+    try:
+        superadmin, err, status = get_authorized_superadmin(required_section="chat", required_permissions="edit")
+        if err:
+            return err, status
+
+        panel = superadmin.superadminPanel
+        if not panel or not panel.allUsers:
+            return jsonify({"status": "error", "message": "No users found"}), 404
+
+        all_users = panel.allUsers
+
+        if id != 0:
+            user = next((u for u in all_users if u.id == id), None)
+            if not user:
+                return jsonify({"status": "error", "message": "User not found"}), 404
+
+            return jsonify({
+                "status": "success",
+                "user": {
+                    'id': user.id,
+                    'userName': user.userName,
+                    'email': user.email,
+                    'empId': user.empId,
+                    'department': user.department,
+                    'source_of_hire': user.sourceOfHire,
+                    'PAN': user.panNumber,
+                    'UAN': user.uanNumber,
+                    'joiningDate': user.joiningDate
+                }
+            }), 200
+
+        # Pagination
+        page = int(request.args.get('page', 1))
+        limit = int(request.args.get('limit', 10))
+        start = (page - 1) * limit
+        end = start + limit
+        total_users = len(all_users)
+        paginated_users = all_users[start:end]
+
+        user_list = []
+        for u in paginated_users:
+            user_list.append({
+                'id': u.id,
+                'userName': u.userName,
+                'email': u.email,
+                'empId': u.empId,
+                'department': u.department,
+                'source_of_hire': u.sourceOfHire,
+                'PAN': u.panNumber,
+                'UAN': u.uanNumber,
+                'joiningDate': u.joiningDate
+            })
+
+        return jsonify({
+            "status": "success",
+            "message": "Users fetched successfully",
+            "page": page,
+            "limit": limit,
+            "total_users": total_users,
+            "total_pages": (total_users + limit - 1) // limit,
+            "users": user_list
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e)
+        }), 500
+
 
 @superAdminBP.route('/message', methods=['POST'])
 def admin_send_message():
@@ -4206,7 +4279,7 @@ def admin_send_message():
             'timestamp': str(message.created_at)
         }, room=receiver_id)
 
-        socketio.emit('message_sent', {'status': 'success'}, room=superadmin.empId)
+        socketio.emit('message_sent', {'status': 'success'}, room=superadmin.superId)
 
         return jsonify({"status": "success", "message": "Message sent"}), 200
 
@@ -4226,33 +4299,42 @@ def get_admin_chat(with_empId):
         if err:
             return err, status
 
-        sender_empId = superadmin.superId
+        user = User.query.filter_by(empId=with_empId).first()
+        if not user:
+            return jsonify({"status": "error", "message": "User not found"}), 404
+
+        sender_id = superadmin.superId  # int
+        receiver_emp_id = user.empId    # string
 
         chats = UserChat.query.filter(
-            ((UserChat.senderID == sender_empId) & (UserChat.recieverID == with_empId)) |
-            ((UserChat.senderID == with_empId) & (UserChat.recieverID == sender_empId))
+            ((UserChat.senderID == sender_id) & (UserChat.recieverID == receiver_emp_id)) |
+            ((UserChat.senderID == receiver_emp_id) & (UserChat.recieverID == str(sender_id)))
         ).order_by(UserChat.created_at.asc()).all()
 
         messages = []
         for chat in chats:
-            message_data = {
+            if chat.image_url:
+                ext = os.path.splitext(chat.image_url)[1].lower()
+                if ext in ['.jpg', '.jpeg', '.png']:
+                    message_type = "image"
+                else:
+                    message_type = "file"
+            else:
+                message_type = "text"
+
+            image_url = None
+            if chat.image_url:
+                image_url = url_for('static', filename=chat.image_url.replace('static/', ''), _external=True)
+
+            messages.append({
                 "id": chat.id,
                 "senderID": chat.senderID,
                 "receiverID": chat.recieverID,
                 "message": chat.message,
-                "image_url": None,
-                "message_type": "image" if chat.image_url and chat.image_url.lower().endswith(('.jpg', '.jpeg', '.png')) else (
-                    "file" if chat.image_url else "text"
-                ),
+                "image_url": image_url,
+                "message_type": message_type,
                 "created_at": chat.created_at.isoformat()
-            }
-
-            if chat.image_url:
-                message_data["image_url"] = url_for(
-                    'static', filename=chat.image_url.replace('static/', ''), _external=True
-                )
-
-            messages.append(message_data)
+            })
 
         return jsonify({"status": "success", "messages": messages}), 200
 
@@ -4262,8 +4344,6 @@ def get_admin_chat(with_empId):
             "message": "Internal Server Error",
             "error": str(e)
         }), 500
-
-
 
 
 # ====================================
