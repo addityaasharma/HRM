@@ -485,7 +485,7 @@ def create_company_details():
 
 
 # ====================================
-#            PUNCH SECTION            
+#            PUNCH SECTION  - Get all punch in details of the users and can also edit 
 # ====================================
 
 
@@ -614,7 +614,7 @@ def editPunchDetails(punchId):
 
      
 # ====================================
-#         ALL EMPLOYEE SECTION        
+#         ALL EMPLOYEE SECTION  - Edit, Add or Delete All Employee 
 # ====================================
 
 
@@ -1001,7 +1001,7 @@ def editEmployee(id):
         return jsonify({"status" : "error", "message" : "Internal Server Error", "error" : str(e)})
 
 # ====================================
-#         USER TICKET SECTION         
+#         USER TICKET SECTION - get all tickets from the user side and update it.         
 # ====================================
 
 
@@ -1298,7 +1298,7 @@ def get_assigned_tickets():
 
 
 # ====================================
-#     USER LEAVE CONTROL SECTION         
+#     USER LEAVE CONTROL SECTION  - can control all leaves request and can also view and edit       
 # ====================================
 
 
@@ -1461,7 +1461,7 @@ def update_user_leave_status(leave_id):
 
 
 # ====================================
-#         ADMIN LEAVE SECTION         
+#         ADMIN LEAVE SECTION  - Admins all leaves policy      
 # ====================================
 
 
@@ -1634,7 +1634,7 @@ def delete_leave(id):
 
 
 # ====================================
-#         DOCUMENT SECTION       
+#         DOCUMENT SECTION      - admin all documents 
 # ====================================
 
 
@@ -1761,7 +1761,7 @@ def delete_details(id):
 
 
 # ====================================
-#            ANNOUNCE SECTION         
+#            ANNOUNCE SECTION       - admin all announcements can also see who likes, polls and comments  
 # ====================================
 
 
@@ -1976,7 +1976,7 @@ def get_announcement():
 
 
 # ====================================
-#         BONUS SECTION                
+#         BONUS SECTION              - admin bonus section where admin can create his own bonus policies  
 # ====================================
 
 @superAdminBP.route('/bonus', methods=['POST'])
@@ -2167,7 +2167,7 @@ def delete_bonus(id):
 
 
 # ====================================
-#      SHIFT AND TIME SECTION               
+#      SHIFT AND TIME SECTION          -  admin shift and time management section where admin can manage time   
 # ====================================
 
 @superAdminBP.route('/shift_time', methods=['POST'])
@@ -2413,7 +2413,7 @@ def edit_shift_policy(shift_id):
 
 
 # ====================================
-#      REMOTE WORK SECTION         
+#      REMOTE WORK SECTION         - admin can also set remote work polciy
 # ====================================
 
 
@@ -2546,7 +2546,7 @@ def delete_remote_work(id):
 
 
 # ====================================
-#      PAYROLL SECTION         
+#      PAYROLL SECTION         -  admin payroll policies
 # ====================================
 
 
@@ -2717,7 +2717,7 @@ def delete_payroll(id):
 
 
 # ====================================
-#          NOTICE SECTION         
+#          NOTICE SECTION         - admin can create notice 
 # ====================================
 
 
@@ -2837,7 +2837,7 @@ def delete_notice(notice_id):
 
 
 # ====================================
-#      EMPLOYEE DOC SECTION           
+#      EMPLOYEE DOC SECTION           - admin can view employee docs
 # ====================================
 
 
@@ -2913,7 +2913,7 @@ def get_employee_documents():
 
 
 # ====================================
-#      PROJECT MANAGEMENT SECTION           
+#      PROJECT MANAGEMENT SECTION           - admin can create projects 
 # ====================================
 
 
@@ -3206,7 +3206,7 @@ def update_project(task_id):
 
 
 # ====================================
-#      CELEBRATION SECTION           
+#      CELEBRATION SECTION           -  admin can view upcoming birthdays of all users
 # ====================================
 
 
@@ -3269,7 +3269,7 @@ def get_upcoming_birthdays():
         }), 500
 
 # ====================================
-#        HOLIDAY SECTION           
+#        HOLIDAY SECTION           -  admin can set, view and change holidays 
 # ====================================
 
 @superAdminBP.route('/holiday', methods=['POST'])
@@ -3456,7 +3456,7 @@ def toggle_holiday(holiday_id):
 
 
 # ====================================
-#        ASSETS SECTION           
+#        ASSETS SECTION           -  admin can get assets request from the user and can also edit
 # ====================================
 
 @superAdminBP.route('/assets', methods=['GET'])
@@ -3586,7 +3586,7 @@ def update_asset_status(asset_id):
 
 
 # ====================================
-#      DEPARTMENT SECTION           
+#      DEPARTMENT SECTION            - admin will create department for here only
 # ====================================
 
 
@@ -3722,7 +3722,7 @@ def get_departments_with_users():
 
 
 # ====================================
-#      SALARY SECTION           
+#      SALARY SECTION           -  admin will get calculated salary of all users
 # ====================================
 
 
@@ -4068,7 +4068,7 @@ def get_user_salaries():
 
 
 # ====================================
-#      PROMOTION SECTION           
+#      PROMOTION SECTION         - admin will set promotion of particular users  
 # ====================================
 
 @superAdminBP.route('/promotion/<int:user_id>', methods=['POST'])

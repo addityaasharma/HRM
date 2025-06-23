@@ -14,6 +14,10 @@ from redis import Redis
 import random,os
 import string, math
 from sqlalchemy.orm import joinedload
+from flask import url_for
+from werkzeug.utils import secure_filename
+import os
+
 
 
 user = Blueprint('user',__name__, url_prefix='/user')
@@ -1412,13 +1416,14 @@ def send_message():
         if not user.panelData:
             return jsonify({"status": "error", "message": "Panel data not found"}), 404
 
-        data = request.get_json()
-        required_fields = ['recieverID', 'message']
-        if not all(field in data for field in required_fields):
-            return jsonify({"status": "error", "message": "All fields are required"}), 400
+        recieverId = request.form.get('recieverID')
+        message_text = request.form.get('message')
+        uploaded_file = request.files.get('file') 
 
-        recieverId = data['recieverID']
-        message_text = data['message']
+        if not recieverId:
+            return jsonify({"status": "error", "message": "Receiver ID is required"}), 400
+        if not message_text and not uploaded_file:
+            return jsonify({"status": "error", "message": "Message or file is required"}), 400
 
         reciever = User.query.filter_by(id=recieverId).first()
         if not reciever:
@@ -1428,21 +1433,45 @@ def send_message():
         if not superadmin:
             return jsonify({"status": "error", "message": "Receiver not found"}), 400
 
+        file_url = None
+        message_type = 'text'
+
+        if uploaded_file:
+            filename = secure_filename(uploaded_file.filename)
+            file_ext = filename.rsplit('.', 1)[-1].lower()
+            mimetype = uploaded_file.mimetype
+
+            folder_path = os.path.join('static', 'uploads', 'chat_files')
+            os.makedirs(folder_path, exist_ok=True)
+
+            filepath = os.path.join(folder_path, filename)
+            uploaded_file.save(filepath)
+            file_url = filepath
+
+            if mimetype.startswith("image/"):
+                message_type = 'image' if not message_text else 'text_image'
+            else:
+                message_type = 'file' if not message_text else 'text_file'
+
         message = UserChat(
             panelData=user.panelData.id,
             senderID=user.empId,
             recieverID=reciever.empId,
-            message=message_text,
+            message=message_text if message_text else None,
+            image_url=file_url,
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow()
         )
 
         db.session.add(message)
         db.session.commit()
+
         socketio.emit('receive_message', {
             'senderID': user.empId,
             'recieverID': reciever.empId,
             'message': message_text,
+            'file_url': file_url,
+            'message_type': message_type,
             'timestamp': str(message.created_at)
         }, room=recieverId)
 
@@ -1452,8 +1481,12 @@ def send_message():
 
     except Exception as e:
         db.session.rollback()
-        return jsonify({"status": "error", "message": "Internal Server Error", "error": str(e)}), 500
-    
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e)
+        }), 500
+
 
 @user.route('/message/<string:with_empId>', methods=['GET'])
 def get_chat_messages(with_empId):
@@ -1473,15 +1506,27 @@ def get_chat_messages(with_empId):
             ((UserChat.senderID == with_empId) & (UserChat.recieverID == sender_empId))
         ).order_by(UserChat.created_at.asc()).all()
 
-        messages = [{
-            "id": chat.id,
-            "senderID": chat.senderID,
-            "receiverID": chat.recieverID,
-            "message": chat.message,
-            "created_at": chat.created_at.isoformat()
-        } for chat in chats]
+        messages = []
+        for chat in chats:
+            message_data = {
+                "id": chat.id,
+                "senderID": chat.senderID,
+                "receiverID": chat.recieverID,
+                "message": chat.message,
+                "image_url": None,
+                "message_type": "image" if chat.image_url else "text",
+                "created_at": chat.created_at.isoformat()
+            }
 
-        return jsonify({"status": "success", "messages": messages}), 200
+            if chat.image_url:
+                message_data["image_url"] = url_for('static', filename=chat.image_url.replace('static/', ''), _external=True)
+
+            messages.append(message_data)
+
+        return jsonify({
+            "status": "success",
+            "messages": messages
+        }), 200
 
     except Exception as e:
         return jsonify({
@@ -2697,6 +2742,7 @@ def update_promotion_description(promotion_id):
 # ====================================
 #        USER JOB SECTION
 # ====================================
+
 
 @user.route('/jobinfo', methods=['POST'])
 def add_job_info():

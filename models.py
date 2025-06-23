@@ -391,6 +391,7 @@ class UserChat(db.Model):
     senderID = db.Column(db.String(120),nullable=False)
     recieverID = db.Column(db.String(120), nullable=False)
     message = db.Column(db.Text, nullable=False)
+    image_url = db.Column(db.String(255))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
