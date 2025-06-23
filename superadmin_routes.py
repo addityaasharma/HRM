@@ -4184,6 +4184,7 @@ def delete_promotion(promotion_id):
 #      ADMIN MESSAGE SECTION         - admin will chat with users  
 # ====================================
 
+
 @superAdminBP.route('/message', methods=['POST'])
 def admin_send_message():
     try:
@@ -4259,6 +4260,7 @@ def admin_send_message():
             "error": str(e)
         }), 500
 
+
 @superAdminBP.route('/message/<string:with_empId>', methods=['GET'])
 def get_admin_chat(with_empId):
     try:
@@ -4306,7 +4308,6 @@ def get_admin_chat(with_empId):
             "message": "Internal Server Error",
             "error": str(e)
         }), 500
-
 
 
 # ====================================

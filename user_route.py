@@ -3069,3 +3069,55 @@ def get_user_salary_details():
             "message": "Failed to fetch salary details",
             "error": str(e)
         }), 500
+
+
+# ====================================
+#        USER LOCATION SECTION
+# ====================================
+
+@user.route('/location', methods=['GET'])
+def get_admin_location_for_user():
+    try:
+        user_id = g.user.get('userID') if g.user else None
+        if not user_id:
+            return jsonify({
+                "status": "error",
+                "message": "Unauthorized access – user token missing"
+            }), 401
+
+        user = User.query.filter_by(id=user_id).first()
+        if not user or not user.superadminId:
+            return jsonify({
+                "status": "error",
+                "message": "User not found or not associated with any admin"
+            }), 404
+
+        superadmin = SuperAdmin.query.filter_by(superId=user.superadminId).first()
+        if not superadmin or not superadmin.superadminPanel:
+            return jsonify({
+                "status": "error",
+                "message": "Admin panel not found"
+            }), 404
+
+        location = AdminLocation.query.filter_by(superpanel=superadmin.superadminPanel.id).first()
+        if not location:
+            return jsonify({
+                "status": "error",
+                "message": "Admin has not set a location yet"
+            }), 404
+
+        return jsonify({
+            "status": "success",
+            "message": "Admin location retrieved successfully",
+            "data": {
+                "latitude": location.latitude,
+                "longitude": location.longitude
+            }
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": "Internal server error",
+            "error": str(e)
+        }), 500
