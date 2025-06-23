@@ -495,7 +495,7 @@ def create_company_details():
 @superAdminBP.route('/punchdetails', methods=['GET'])
 def all_punchDetails():
     try:
-        superadmin, err, status = get_authorized_superadmin()
+        superadmin, err, status = get_authorized_superadmin(required_section="attendance", required_permissions="view")
         if err:
             return err, status
 
@@ -588,7 +588,7 @@ def editPunchDetails(punchId):
         }), 404
     
     try:
-        superadmin, err, status = get_authorized_superadmin()
+        superadmin, err, status = get_authorized_superadmin(required_section="attendance", required_permissions="edit")
         if err:
             return err, status
         
@@ -624,7 +624,7 @@ def editPunchDetails(punchId):
 @superAdminBP.route('/all-users/<int:id>', methods=['GET'])
 def all_users_or_one(id):
     try:
-        superadmin, err, status = get_authorized_superadmin()
+        superadmin, err, status = get_authorized_superadmin(required_section="employee", required_permissions="view")
         if err:
             return err, status
 
@@ -793,7 +793,7 @@ def edit_user(userId):
         }), 400
 
     try:
-        superadmin, err, status = get_authorized_superadmin()
+        superadmin, err, status = get_authorized_superadmin(required_section="employee", required_permissions="edit")
         if err:
             return err, status
 
@@ -913,21 +913,12 @@ def employeeCreation():
         return jsonify({'error': 'User already exists'}), 409
 
     try:
-        userID = g.user.get('userID') if g.user else None
-        if not userID:
-            return jsonify({"status": "error", "message": "No user or auth token"}), 400
-
-        superadmin = SuperAdmin.query.filter_by(id=userID).first()
-        if superadmin:
-            panel_id = superadmin.superadminPanel.id
-            superadminID = superadmin.superId
-        else:
-            user = User.query.filter_by(id=userID).first()
-            if not user or user.userRole.lower() != 'hr':
-                return jsonify({"status": "error", "message": "You are not allowed to manage this"}), 403
-            superadminID = user.superadminId
-            superadmin = SuperAdmin.query.filter_by(superId=superadminID).first()
-            panel_id = user.superadmin_panel_id
+        superadmin, err, status = get_authorized_superadmin(required_section="employee", required_permissions="edit")
+        if err:
+            return err, status
+        
+        panel_id = superadmin.superadminPanel.id
+        superadminID = superadmin.superId
 
         if not superadmin:
             return jsonify({"status": "error", "message": "No superadmin found"}), 404
@@ -986,7 +977,7 @@ def employeeCreation():
 @superAdminBP.route('/all-users/<int:id>', methods=['DELETE'])
 def editEmployee(id):
     try:
-        superadmin, err, status = get_authorized_superadmin()
+        superadmin, err, status = get_authorized_superadmin(required_section="employee", required_permissions="delete")
         if err:
             return err, status
             
@@ -1013,7 +1004,7 @@ def editEmployee(id):
 @superAdminBP.route('/ticket', methods=['GET'])
 def allTickets():
     try:
-        superadmin, err, status = get_authorized_superadmin()
+        superadmin, err, status = get_authorized_superadmin(required_section="ticket", required_permissions="view")
         if err:
             return err, status
 
@@ -1134,7 +1125,7 @@ def editTicket(ticket_id):
     try:
         superadmin, err, status = get_authorized_superadmin(
             required_section="ticket",
-            required_permissions="assign"
+            required_permissions="edit"
         )
         if err:
             return err, status
@@ -1311,7 +1302,7 @@ def get_assigned_tickets():
 @superAdminBP.route('/userleave', methods=['GET'])
 def user_leaves():
     try:
-        superadmin, err, status = get_authorized_superadmin()
+        superadmin, err, status = get_authorized_superadmin(required_section="leave", required_permissions="view")
         if err:
             return err, status
         
@@ -1407,7 +1398,7 @@ def user_leaves():
 @superAdminBP.route('/userleave/<int:leave_id>', methods=['PUT'])
 def update_user_leave_status(leave_id):
     try:
-        superadmin, err, status = get_authorized_superadmin()
+        superadmin, err, status = get_authorized_superadmin(required_section="leave", required_permissions="edit")
         if err:
             return err, status
 
@@ -1485,7 +1476,7 @@ def addLeave():
         return jsonify({"status": "error", "message": "Please enter all required fields"}), 400
 
     try:
-        superadmin, err, status = get_authorized_superadmin()
+        superadmin, err, status = get_authorized_superadmin(required_section="policy", required_permissions="edit")
         if err:
             return err, status
 
@@ -1536,7 +1527,7 @@ def editleave(id):
         return jsonify({"status": "error", "message": "No data provided"}), 400
 
     try:
-        superadmin, err, status = get_authorized_superadmin()
+        superadmin, err, status = get_authorized_superadmin(required_section="policy", required_permissions="edit")
         if err:
             return err, status
 
@@ -1573,7 +1564,7 @@ def editleave(id):
 @superAdminBP.route('/adminleave', methods=['GET'])
 def get_leaveDetails():
     try:
-        superadmin, err, status = get_authorized_superadmin()
+        superadmin, err, status = get_authorized_superadmin(required_section="policy", required_permissions="view")
         if err:
             return err, status
 
@@ -1616,7 +1607,7 @@ def get_leaveDetails():
 @superAdminBP.route('/adminleave/<int:id>', methods=['DELETE'])
 def delete_leave(id):
     try:
-        superadmin, err, status = get_authorized_superadmin()
+        superadmin, err, status = get_authorized_superadmin(required_section="policy", required_permissions="delete")
         if err:
             return err, status
 
@@ -1651,7 +1642,7 @@ def documents():
     title = request.form.get('title', '')
     files = request.files.get('document')
     try:
-        superadmin, err, status = get_authorized_superadmin()
+        superadmin, err, status = get_authorized_superadmin(required_section="documents", required_permissions="edit")
         if err:
             return err, status
         
@@ -1678,7 +1669,7 @@ def documents():
 @superAdminBP.route('/documents/<int:id>', methods=['PUT'])
 def edit_document(id):
     try:
-        superadmin, err, status = get_authorized_superadmin()
+        superadmin, err, status = get_authorized_superadmin(required_section="documents", required_permissions="view")
         if err:
             return err, status
 
@@ -1709,7 +1700,7 @@ def edit_document(id):
 @superAdminBP.route('/documents', methods=['GET'])
 def document_details():
     try:
-        superadmin, err, status = get_authorized_superadmin()
+        superadmin, err, status = get_authorized_superadmin(required_section="documents", required_permissions="view")
         if err:
             return err, status
 
@@ -1747,7 +1738,7 @@ def document_details():
 @superAdminBP.route('/documents/<int:id>', methods=['DELETE'])
 def delete_details(id):
     try:
-        superadmin, err, status = get_authorized_superadmin()
+        superadmin, err, status = get_authorized_superadmin(required_section="documents", required_permissions="delete")
         if err:
             return err, status
         
@@ -1777,7 +1768,7 @@ def delete_details(id):
 @superAdminBP.route('/announcement', methods=['POST'])
 def create_announcement():
     try:
-        superadmin, err, status = get_authorized_superadmin()
+        superadmin, err, status = get_authorized_superadmin(required_section="announcement", required_permissions="edit")
         if err:
             return err, status
 
@@ -1882,7 +1873,7 @@ def create_announcement():
 @superAdminBP.route('/announcement/<int:id>', methods=['DELETE'])
 def delete_announcement(id):
     try:
-        superadmin, err, status = get_authorized_superadmin()
+        superadmin, err, status = get_authorized_superadmin(required_section="announcement", required_permissions="delete")
         if err:
             return err, status
 
@@ -2006,7 +1997,7 @@ def add_bonus():
         }), 400
 
     try:
-        superadmin, err, status = get_authorized_superadmin()
+        superadmin, err, status = get_authorized_superadmin(required_section="policy", required_permissions="edit")
         if err:
             return err, status
 
@@ -2047,7 +2038,7 @@ def add_bonus():
 @superAdminBP.route('/bonus', methods=['GET'])
 def get_bonus():
     try:
-        superadmin, err, status = get_authorized_superadmin()
+        superadmin, err, status = get_authorized_superadmin(required_section="policy", required_permissions="view")
         if err:
             return err, status
 
@@ -2101,7 +2092,7 @@ def edit_bonus(id):
         }), 400
 
     try:
-        superadmin, err, status = get_authorized_superadmin()
+        superadmin, err, status = get_authorized_superadmin(required_section="bonus", required_permissions="edit")
         if err:
             return err, status
 
@@ -2146,7 +2137,7 @@ def edit_bonus(id):
 @superAdminBP.route('/bonus/<int:id>', methods=['DELETE'])
 def delete_bonus(id):
     try:
-        superadmin, err, status = get_authorized_superadmin()
+        superadmin, err, status = get_authorized_superadmin(required_section="policy", required_permissions="delete")
         if err:
             return err, status
 
@@ -2184,7 +2175,7 @@ def delete_bonus(id):
 @superAdminBP.route('/shift_time', methods=['POST'])
 def addshift():
     try:
-        superadmin, err, status = get_authorized_superadmin()
+        superadmin, err, status = get_authorized_superadmin(required_section="policy", required_permissions="edit")
         if err:
             return err, status
 
@@ -2261,7 +2252,7 @@ def addshift():
 @superAdminBP.route('/shift_time', methods=['GET'])
 def get_shift_policy():
     try:
-        superadmin, err, status = get_authorized_superadmin()
+        superadmin, err, status = get_authorized_superadmin(required_section="policy", required_permissions="view")
         if err:
             return err, status
 
@@ -2311,7 +2302,7 @@ def get_shift_policy():
 @superAdminBP.route('/shift_time/<int:shift_id>', methods=['DELETE'])
 def delete_shift_policy(shift_id):
     try:
-        superadmin, err, status = get_authorized_superadmin()
+        superadmin, err, status = get_authorized_superadmin(required_section="policy", required_permissions="delete")
         if err:
             return err, status
 
@@ -2342,7 +2333,7 @@ def delete_shift_policy(shift_id):
 @superAdminBP.route('/shift_time/<int:shift_id>', methods=['PUT'])
 def edit_shift_policy(shift_id):
     try:
-        superadmin, err, status = get_authorized_superadmin()
+        superadmin, err, status = get_authorized_superadmin(required_section="policy", required_permissions="edit")
         if err:
             return err, status
 
@@ -2432,7 +2423,7 @@ def edit_shift_policy(shift_id):
 @superAdminBP.route('/remotework', methods=['POST'])
 def add_remoteWork():
     try:
-        superadmin, err, status = get_authorized_superadmin()
+        superadmin, err, status = get_authorized_superadmin(required_section="policy", required_permissions="edit")
         if err:
             return err, status
 
@@ -2484,7 +2475,7 @@ def add_remoteWork():
 @superAdminBP.route('/remotework', methods=['GET'])
 def get_remote_work():
     try:
-        superadmin, err, status = get_authorized_superadmin()
+        superadmin, err, status = get_authorized_superadmin(required_section="policy", required_permissions="view")
         if err:
             return err, status
 
@@ -2514,7 +2505,7 @@ def get_remote_work():
 def update_remote_work(id):
     try:
         data = request.get_json()
-        superadmin, err, status = get_authorized_superadmin()
+        superadmin, err, status = get_authorized_superadmin(required_section="policy", required_permissions="edit")
         if err:
             return err, status
 
@@ -2539,7 +2530,7 @@ def update_remote_work(id):
 @superAdminBP.route('/remotework/<int:id>', methods=['DELETE'])
 def delete_remote_work(id):
     try:
-        superadmin, err, status = get_authorized_superadmin()
+        superadmin, err, status = get_authorized_superadmin(required_section="policy", required_permissions="delete")
         if err:
             return err, status
 
@@ -2567,28 +2558,9 @@ def delete_remote_work(id):
 @superAdminBP.route('/payroll', methods=['POST'])
 def add_payroll():
     try:
-        userID = g.user.get('userID') if g.user else None
-        if not userID:
-            return jsonify({
-                "status": "error",
-                "message": "No user ID or auth token"
-            }), 404
-
-        # Check if user is SuperAdmin or HR under a SuperAdmin
-        superadmin = SuperAdmin.query.filter_by(id=userID).first()
-        if not superadmin:
-            user = User.query.filter_by(id=userID).first()
-            if not user or user.userRole.lower() != 'hr':
-                return jsonify({
-                    "status": "error",
-                    "message": "Unauthorized"
-                }), 409
-            superadmin = SuperAdmin.query.filter_by(superId=user.superadminId).first()
-            if not superadmin:
-                return jsonify({
-                    "status": "error",
-                    "message": "No superadmin found"
-                }), 404
+        superadmin, err, status = get_authorized_superadmin(required_section="policy", required_permissions="edit")
+        if err:
+            return err, status
 
         data = request.get_json()
         if not data:
@@ -2626,7 +2598,7 @@ def add_payroll():
             disbursement=disbursement,
             employeementType=data['employeementType'],
             departmentType=data['departmentType'],
-            superpanel=superadmin.id
+            superpanel=superadmin.superadminPanel.id
         )
 
         db.session.add(policy)
@@ -2649,7 +2621,7 @@ def add_payroll():
 @superAdminBP.route('/payroll', methods=['GET'])
 def get_payrolls():
     try:
-        superadmin, err, status = get_authorized_superadmin()
+        superadmin, err, status = get_authorized_superadmin(required_section="policy", required_permissions="view")
         if err:
             return err, status
 
@@ -2676,7 +2648,7 @@ def get_payrolls():
 @superAdminBP.route('/payroll/<int:id>', methods=['PUT'])
 def update_payroll(id):
     try:
-        superadmin, err, status = get_authorized_superadmin()
+        superadmin, err, status = get_authorized_superadmin(required_section="policy", required_permissions="edit")
         if err:
             return err, status
 
@@ -2713,7 +2685,7 @@ def update_payroll(id):
 @superAdminBP.route('/payroll/<int:id>', methods=['DELETE'])
 def delete_payroll(id):
     try:
-        superadmin, err, status = get_authorized_superadmin()
+        superadmin, err, status = get_authorized_superadmin(required_section="policy", required_permissions="delete")
         if err:
             return err, status
 
@@ -2740,7 +2712,7 @@ def delete_payroll(id):
 @superAdminBP.route('/notice', methods=['POST'])
 def add_notice():
     try:
-        superadmin, err, status = get_authorized_superadmin()
+        superadmin, err, status = get_authorized_superadmin(required_section="notice", required_permissions="edit")
         if err:
             return err, status
 
@@ -2783,7 +2755,7 @@ def add_notice():
 @superAdminBP.route('/notice', methods=['GET'])
 def get_notices():
     try:
-        superadmin, err, status = get_authorized_superadmin()
+        superadmin, err, status = get_authorized_superadmin(required_section="notice", required_permissions="view")
         if err:
             return err, status
 
@@ -2827,7 +2799,7 @@ def get_notices():
 @superAdminBP.route('/notice/<int:notice_id>', methods=['DELETE'])
 def delete_notice(notice_id):
     try:
-        superadmin, err, status = get_authorized_superadmin()
+        superadmin, err, status = get_authorized_superadmin(required_section="notice", required_permissions="edit")
         if err:
             return err, status
 
@@ -2862,7 +2834,7 @@ def delete_notice(notice_id):
 @superAdminBP.route('/employee_document', methods=['GET'])
 def get_employee_documents():
     try:
-        superadmin, err, status = get_authorized_superadmin()
+        superadmin, err, status = get_authorized_superadmin(required_section="employee", required_permissions="view")
         if err:
             return err, status
 
@@ -2939,19 +2911,9 @@ def get_employee_documents():
 @superAdminBP.route('/project', methods=['POST'])
 def add_Project():
     try:
-        userID = g.user.get('userID') if g.user else None
-        if not userID:
-            return None, jsonify({"status": "error", "message": "No auth token"}), 401
-
-        superadmin = SuperAdmin.query.filter_by(id=userID).first()
-        if not superadmin:
-            user = User.query.filter_by(id=userID).first()
-            if not user or user.userRole.lower() != 'teamlead':
-                return None, jsonify({"status": "error", "message": "Unauthorized"}), 403
-            
-            superadmin = SuperAdmin.query.filter_by(superId=user.superadminId).first()
-            if not superadmin:
-                return None, jsonify({"status": "error", "message": "No superadmin found"}), 404
+        superadmin, err, status = get_authorized_superadmin(required_section="project", required_permissions="edit")
+        if err:
+            return err, status
 
         title = request.form.get('title')
         description = request.form.get('description')
@@ -3042,7 +3004,7 @@ def add_Project():
 @superAdminBP.route('/project', methods=['GET'])
 def get_all_projects():
     try:
-        superadmin, err, status = get_authorized_superadmin()
+        superadmin, err, status = get_authorized_superadmin(required_section="project", required_permissions="view")
         if err:
             return err, status
 
@@ -3108,7 +3070,7 @@ def get_all_projects():
 @superAdminBP.route('/project/<int:task_id>', methods=['DELETE'])
 def delete_project(task_id):
     try:
-        superadmin, err, status = get_authorized_superadmin()
+        superadmin, err, status = get_authorized_superadmin(required_section="project", required_permissions="delete")
         if err:
             return err, status
 
@@ -3143,18 +3105,9 @@ def delete_project(task_id):
 @superAdminBP.route('/project/<int:task_id>', methods=['PUT'])
 def update_project(task_id):
     try:
-        userID = g.user.get('userID') if g.user else None
-        if not userID:
-            return jsonify({"status": "error", "message": "No auth token"}), 401
-
-        superadmin = SuperAdmin.query.filter_by(id=userID).first()
-        if not superadmin:
-            user = User.query.filter_by(id=userID).first()
-            if not user or user.userRole.lower() != 'teamlead':
-                return jsonify({"status": "error", "message": "Unauthorized"}), 403
-            superadmin = SuperAdmin.query.filter_by(superId=user.superadminId).first()
-            if not superadmin:
-                return jsonify({"status": "error", "message": "No superadmin found"}), 404
+        superadmin, err, status = get_authorized_superadmin(required_section="project", required_permissions="edit")
+        if err:
+            return err, status
 
         task = TaskManagement.query.filter_by(id=task_id, superpanelId=superadmin.superadminPanel.id).first()
         if not task:
@@ -3298,7 +3251,7 @@ def get_upcoming_birthdays():
 @superAdminBP.route('/holiday', methods=['POST'])
 def add_holidays():
     try:
-        superadmin, err, status = get_authorized_superadmin()
+        superadmin, err, status = get_authorized_superadmin(required_section="holiday", required_permissions="edit")
         if err:
             return err, status
 
@@ -3380,29 +3333,9 @@ def add_holidays():
 @superAdminBP.route('/holiday', methods=['GET'])
 def get_holiday():
     try:
-        userId = g.user.get('userID') if g.user else None
-        if not userId:
-            return jsonify({
-                "status": "error",
-                "message": "Unauthorized",
-            }), 401
-
-        superadmin = SuperAdmin.query.filter_by(id=userId).first()
-
-        if not superadmin:
-            user = User.query.filter_by(id=userId).first()
-            if not user or not user.superadminId:
-                return jsonify({
-                    "status": "error",
-                    "message": "Unauthorized"
-                }), 401
-            superadmin = SuperAdmin.query.filter_by(superId=user.superadminId).first()
-
-        if not superadmin or not superadmin.superadminPanel:
-            return jsonify({
-                "status": "error",
-                "message": "Superadmin panel not found"
-            }), 404
+        superadmin, err, status = get_authorized_superadmin(required_section="holiday", required_permissions="view")
+        if err:
+            return err, status
 
         holidays = superadmin.superadminPanel.adminHolidays
 
@@ -3441,7 +3374,7 @@ def get_holiday():
 @superAdminBP.route('/holiday/<int:holiday_id>', methods=['PUT'])
 def toggle_holiday(holiday_id):
     try:
-        superadmin, err, status = get_authorized_superadmin()
+        superadmin, err, status = get_authorized_superadmin(required_section="holiday", required_permissions="edit")
         if err:
             return err, status
 
@@ -3487,7 +3420,7 @@ def toggle_holiday(holiday_id):
 @superAdminBP.route('/assets', methods=['GET'])
 def get_all_assets():
     try:
-        superadmin, err, status = get_authorized_superadmin()
+        superadmin, err, status = get_authorized_superadmin(required_section="employee", required_permissions="view")
         if err:
             return err, status
 
@@ -3553,7 +3486,7 @@ def get_all_assets():
 @superAdminBP.route('/assets/<int:asset_id>', methods=['PUT'])
 def update_asset_status(asset_id):
     try:
-        superadmin, err, status = get_authorized_superadmin()
+        superadmin, err, status = get_authorized_superadmin(required_section="employee", required_permissions="edit")
         if err:
             return err, status
 
@@ -3627,7 +3560,7 @@ def add_department():
                 "message": "Department name is required"
             }), 400
 
-        superadmin, err, status = get_authorized_superadmin()
+        superadmin, err, status = get_authorized_superadmin(required_section="department", required_permissions="edit")
         if err:
             return err, status
 
@@ -3671,7 +3604,7 @@ def add_department():
 @superAdminBP.route('/department/<int:id>', methods=['DELETE'])
 def delete_department(id):
     try:
-        superadmin, err, status = get_authorized_superadmin()
+        superadmin, err, status = get_authorized_superadmin(required_section="department", required_permissions="delete")
         if err:
             return err, status
 
@@ -3702,7 +3635,7 @@ def delete_department(id):
 @superAdminBP.route('/department', methods=['GET'])
 def get_departments_with_users():
     try:
-        superadmin, err, status = get_authorized_superadmin()
+        superadmin, err, status = get_authorized_superadmin(required_section="department", required_permissions="view")
         if err:
             return err, status
 
@@ -3757,7 +3690,7 @@ def get_departments_with_users():
 @superAdminBP.route('/salary', methods=['GET'])
 def get_all_user_admin_data():
     try:
-        superadmin, err, status = get_authorized_superadmin(required_section="dashboard", required_permissions="view")
+        superadmin, err, status = get_authorized_superadmin(required_section="salary", required_permissions="view")
         if err:
             return err, status
 
@@ -4115,7 +4048,7 @@ def promote_user(user_id):
                 "message": "Missing 'new_designation' in request body"
             }), 400
 
-        user = User.query.filter_by(id=user_id, superadminId=superadmin.superId).first()
+        user = User.query.filter_by(id=user_id).first()
         if not user:
             return jsonify({"status": "error", "message": "User not found"}), 404
 
@@ -4123,9 +4056,9 @@ def promote_user(user_id):
         if not panel:
             return jsonify({"status": "error", "message": "User panel data not found"}), 404
 
-        job_info = user.department
+        job_info = user.department or 'technical'
 
-        previous_department = job_info.department
+        previous_department = job_info
         new_department = data.get("new_department", previous_department)
         new_designation = data["new_designation"]
         description = data.get("description")
@@ -4172,7 +4105,7 @@ def promote_user(user_id):
 @superAdminBP.route('/promotion/<int:promotion_id>', methods=['DELETE'])
 def delete_promotion(promotion_id):
     try:
-        superadmin, err, status = get_authorized_superadmin(required_section="employee", required_permissions="edit")
+        superadmin, err, status = get_authorized_superadmin(required_section="employee", required_permissions="delete")
         if err:
             return err, status
 
@@ -4217,13 +4150,9 @@ def delete_promotion(promotion_id):
 @superAdminBP.route('/message', methods=['POST'])
 def admin_send_message():
     try:
-        superadminID = g.user.get('userID') if g.user else None
-        if not superadminID or g.user.get('userType') != 'superadmin':
-            return jsonify({"status": "error", "message": "Unauthorized"}), 403
-
-        superadmin = SuperAdmin.query.filter_by(id=superadminID).first()
-        if not superadmin:
-            return jsonify({"status": "error", "message": "Admin not found"}), 404
+        superadmin, err, status = get_authorized_superadmin(required_section="chat", required_permissions="edit")
+        if err:
+            return err, status
 
         receiver_id = request.form.get('recieverID')
         message_text = request.form.get('message')
@@ -4257,7 +4186,7 @@ def admin_send_message():
 
         message = UserChat(
             panelData=user.panelData.id,
-            senderID=superadmin.empId,
+            senderID=superadmin.superId,
             recieverID=user.empId,
             message=message_text if message_text else None,
             image_url=file_url,
@@ -4269,7 +4198,7 @@ def admin_send_message():
         db.session.commit()
 
         socketio.emit('receive_message', {
-            'senderID': superadmin.empId,
+            'senderID': superadmin.superId,
             'recieverID': user.empId,
             'message': message_text,
             'file_url': file_url,
@@ -4293,15 +4222,11 @@ def admin_send_message():
 @superAdminBP.route('/message/<string:with_empId>', methods=['GET'])
 def get_admin_chat(with_empId):
     try:
-        superadminID = g.user.get('userID') if g.user else None
-        if not superadminID or g.user.get('userType') != 'superadmin':
-            return jsonify({"status": "error", "message": "Unauthorized"}), 403
+        superadmin, err, status = get_authorized_superadmin(required_section="chat", required_permissions="view")
+        if err:
+            return err, status
 
-        superadmin = SuperAdmin.query.filter_by(id=superadminID).first()
-        if not superadmin or not superadmin.companyEmail:
-            return jsonify({"status": "error", "message": "Admin not found"}), 404
-
-        sender_empId = superadmin.companyEmail
+        sender_empId = superadmin.superId
 
         chats = UserChat.query.filter(
             ((UserChat.senderID == sender_empId) & (UserChat.recieverID == with_empId)) |
@@ -4349,7 +4274,7 @@ def get_admin_chat(with_empId):
 @superAdminBP.route('/location', methods=['POST'])
 def set_admin_location():
     try:
-        superadmin, err, status = get_authorized_superadmin()
+        superadmin, err, status = get_authorized_superadmin(required_section="policy", required_permissions="edit")
         if err:
             return err, status
 
@@ -4408,7 +4333,7 @@ def set_admin_location():
 @superAdminBP.route('/location', methods=['GET'])
 def get_admin_location():
     try:
-        superadmin, err, status = get_authorized_superadmin()
+        superadmin, err, status = get_authorized_superadmin(required_section="policy", required_permissions="edit")
         if err:
             return err, status
 
