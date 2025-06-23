@@ -595,3 +595,86 @@ def get_all_user_admin_data():
             "message": "Failed to fetch user-admin data",
             "error": str(e)
         }), 500
+    
+
+@superAdminBP.route('/message', methods=['POST'])
+def admin_send_message():
+    try:
+        superadmin, err, status = get_authorized_superadmin(required_section="chat", required_permissions="edit")
+        if err:
+            return err, status
+
+        receiver_id = request.form.get('recieverID')
+        department_name = request.form.get('department')  # optional
+        message_text = request.form.get('message')
+        uploaded_file = request.files.get('file')
+
+        if not receiver_id and not department_name:
+            return jsonify({"status": "error", "message": "Receiver ID or Department is required"}), 400
+        if not message_text and not uploaded_file:
+            return jsonify({"status": "error", "message": "Message or file required"}), 400
+
+        # File handling
+        file_url = None
+        message_type = 'text'
+
+        if uploaded_file:
+            filename = secure_filename(uploaded_file.filename)
+            mimetype = uploaded_file.mimetype
+            folder_path = os.path.join('static', 'uploads', 'chat_files')
+            os.makedirs(folder_path, exist_ok=True)
+            filepath = os.path.join(folder_path, filename)
+            uploaded_file.save(filepath)
+            file_url = filepath
+
+            if mimetype.startswith("image/"):
+                message_type = 'image' if not message_text else 'text_image'
+            else:
+                message_type = 'file' if not message_text else 'text_file'
+
+        # Determine recipients
+        if department_name:
+            users = User.query.filter_by(superadminId=superadmin.superId, department=department_name).all()
+            if not users:
+                return jsonify({"status": "error", "message": "No users found in this department"}), 404
+        else:
+            user = User.query.filter_by(id=receiver_id).first()
+            if not user:
+                return jsonify({"status": "error", "message": "User not found"}), 404
+            users = [user]
+
+        # Send to all selected users
+        for user in users:
+            message = UserChat(
+                panelData=user.panelData.id,
+                senderID=superadmin.superId,
+                recieverID=user.empId,
+                message=message_text if message_text else None,
+                image_url=file_url,
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow()
+            )
+            db.session.add(message)
+            db.session.flush()  # get created_at
+
+            socketio.emit('receive_message', {
+                'senderID': superadmin.superId,
+                'recieverID': user.empId,
+                'message': message_text,
+                'file_url': file_url,
+                'message_type': message_type,
+                'timestamp': str(message.created_at)
+            }, room=user.id)  # emit to individual user room
+
+        db.session.commit()
+
+        socketio.emit('message_sent', {'status': 'success'}, room=str(superadmin.superId))
+        return jsonify({"status": "success", "message": "Message sent successfully"}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e)
+        }), 500

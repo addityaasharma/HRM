@@ -2905,7 +2905,7 @@ def get_job_info():
 # ====================================
 
 
-@user.route('/salary', methods=['GET'])
+@user.route('/salarydetails', methods=['GET'])
 def get_user_salary_details():
     try:
         user_id = g.user.get('userID') if g.user else None
@@ -2964,8 +2964,8 @@ def get_user_salary_details():
         # --- Job & Salary Info ---
         job_info = {
             "department": panel_data.userJobInfo[0].department if panel_data.userJobInfo else None,
-            "designation": panel_data.userJobInfo[0].designation if panel_data.userJobInfo else None,
-            "joiningDate": panel_data.userJobInfo[0].joiningDate.isoformat() if panel_data.userJobInfo and panel_data.userJobInfo[0].joiningDate else None
+            # "designation": panel_data.userJobInfo[0].designation if panel_data.userJobInfo else None,
+            # "joiningDate": panel_data.userJobInfo[0].joiningDate.isoformat() if panel_data.userJobInfo and panel_data.userJobInfo[0].joiningDate else None
         }
 
         current_salary = user.currentSalary
