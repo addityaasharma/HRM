@@ -270,6 +270,7 @@ def get_myDetails():
             adminDetails = {
                 "id": superadmin.id,
                 "companyName": superadmin.companyName,
+                "companySuperId": superadmin.superId,
                 "companyEmail": superadmin.companyEmail,
                 "company_type": superadmin.company_type,
                 "company_website": superadmin.company_website,
@@ -342,7 +343,7 @@ def get_myDetails():
             "created_at": user.created_at.strftime('%Y-%m-%d %H:%M:%S') if user.created_at else None
         }
 
-        return jsonify({"status": "success", "message": "Fetched Successfully", "data": userDetails}), 200
+        return jsonify({"status": "success", "message": "Fetched Successfully", "data": len(userDetails)}), 200
 
     except Exception as e:
         db.session.rollback()
@@ -4146,6 +4147,7 @@ def delete_promotion(promotion_id):
 #      ADMIN MESSAGE SECTION         - admin will chat with users  
 # ====================================
 
+
 @superAdminBP.route('/message_users/<int:id>', methods=['GET'])
 def get_message_users(id):
     try:
@@ -4344,6 +4346,8 @@ def get_admin_chat(with_empId):
             "message": "Internal Server Error",
             "error": str(e)
         }), 500
+
+
 
 
 # ====================================
