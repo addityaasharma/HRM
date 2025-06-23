@@ -16,7 +16,7 @@ import string, math
 from sqlalchemy.orm import joinedload
 from flask import url_for
 from werkzeug.utils import secure_filename
-import os
+import os, calendar
 
 
 
@@ -2889,3 +2889,183 @@ def get_job_info():
 
     except Exception as e:
         return jsonify({"status": "error", "message": "Server error", "error": str(e)}), 500
+
+
+
+# ====================================
+#        USER SALARY SECTION
+# ====================================
+
+
+@user.route('/salary', methods=['GET'])
+def get_user_salary_details():
+    try:
+        user_id = g.user.get('userID') if g.user else None
+        if not user_id:
+            return jsonify({
+                "status": "error",
+                "message": "Unauthorized access"
+            }), 401
+
+        user = User.query.filter_by(id=user_id).first()
+        if not user or not user.panelData:
+            return jsonify({
+                "status": "error",
+                "message": "User or panel data not found"
+            }), 404
+
+        panel_data = user.panelData
+        today = datetime.utcnow().date()
+        month_start = today.replace(day=1)
+        month_end = today.replace(day=31) if today.month == 12 else (today.replace(month=today.month + 1, day=1) - timedelta(days=1))
+
+        # --- Punch Data ---
+        punch_query = db.session.query(PunchData).filter(
+            PunchData.panelData == panel_data.id,
+            PunchData.login >= month_start,
+            PunchData.login <= month_end
+        )
+
+        punch_count = punch_query.count()
+        total_halfday = 0
+        total_late = 0
+        for status in punch_query.with_entities(PunchData.status).all():
+            if status[0] == 'halfday':
+                total_halfday += 1
+            elif status[0] == 'late':
+                total_late += 1
+
+        # --- Leave Info ---
+        paid_days = 0
+        unpaid_days = 0
+        leave_count = 0
+
+        leaves = db.session.query(UserLeave).filter(
+            UserLeave.panelData == panel_data.id,
+            UserLeave.status == 'approved',
+            UserLeave.leavefrom >= month_start,
+            UserLeave.leavefrom <= month_end
+        ).all()
+
+        leave_count = len(leaves)
+        for leave in leaves:
+            unpaid = leave.unpaidDays or 0
+            unpaid_days += unpaid
+            paid_days += max((leave.days or 0) - unpaid, 0)
+
+        # --- Job & Salary Info ---
+        job_info = {
+            "department": panel_data.userJobInfo[0].department if panel_data.userJobInfo else None,
+            "designation": panel_data.userJobInfo[0].designation if panel_data.userJobInfo else None,
+            "joiningDate": panel_data.userJobInfo[0].joiningDate.isoformat() if panel_data.userJobInfo and panel_data.userJobInfo[0].joiningDate else None
+        }
+
+        current_salary = user.currentSalary
+
+        # --- Admin Info ---
+        superadmin = SuperAdmin.query.filter_by(superId=user.superadminId).first()
+        admin_panel = superadmin.superadminPanel if superadmin else None
+
+        bonus_policy = [ {
+            "bonus_name": b.bonus_name,
+            "amount": b.amount,
+            "bonus_method": b.bonus_method,
+            "apply": b.apply,
+            "employeement_type": b.employeement_type,
+            "department_type": b.department_type
+        } for b in admin_panel.adminBonusPolicy ] if admin_panel else []
+
+        payroll_policy = [ {
+            "policyname": p.policyname,
+            "calculation_method": p.calculation_method,
+            "overtimePolicy": p.overtimePolicy,
+            "perhour": p.perhour,
+            "pfDeduction": p.pfDeduction,
+            "salaryHoldCondition": p.salaryHoldCondition,
+            "disbursement": p.disbursement.isoformat() if p.disbursement else None,
+            "employeementType": p.employeementType,
+            "departmentType": p.departmentType
+        } for p in admin_panel.adminPayrollPolicy ] if admin_panel else []
+
+        leave_policy = [ {
+            "leaveName": l.leaveName,
+            "leaveType": l.leaveType,
+            "probation": l.probation,
+            "lapse_policy": l.lapse_policy,
+            "calculationType": l.calculationType,
+            "day_type": l.day_type,
+            "encashment": l.encashment,
+            "carryforward": l.carryforward,
+            "max_leave_once": l.max_leave_once,
+            "max_leave_year": l.max_leave_year,
+            "monthly_leave_limit": l.monthly_leave_limit
+        } for l in admin_panel.adminLeave ] if admin_panel else []
+
+        shift = ShiftTimeManagement.query.filter_by(
+            superpanel=admin_panel.id,
+            shiftStatus=True
+        ).first() if admin_panel else None
+
+        # --- Calculate Total Working Days ---
+        total_working_days = 0
+        working_days_list = shift.workingDays if shift and shift.workingDays else []
+        saturday_condition = shift.saturdayCondition if shift and shift.saturdayCondition else None
+
+        if working_days_list:
+            working_days_set = set(day.lower() for day in working_days_list)
+            month_range = calendar.monthrange(today.year, today.month)[1]
+            for day in range(1, month_range + 1):
+                date = datetime(today.year, today.month, day).date()
+                weekday = date.strftime("%A").lower()
+                if weekday == 'saturday':
+                    if saturday_condition:
+                        week_no = (day - 1) // 7 + 1
+                        if (
+                            saturday_condition == 'All Saturdays Working' or
+                            (saturday_condition == 'First & Third Saturdays Working' and week_no in [1, 3]) or
+                            (saturday_condition == 'Second & Fourth Saturdays Working' and week_no in [2, 4]) or
+                            (saturday_condition == 'Only First Saturday Working' and week_no == 1)
+                        ):
+                            total_working_days += 1
+                elif weekday in working_days_set:
+                    total_working_days += 1
+
+        return jsonify({
+            "status": "success",
+            "data": {
+                "user": {
+                    "empId": user.empId,
+                    "name": user.userName,
+                    "email": user.email,
+                    "role": user.userRole,
+                    "basic_salary": current_salary,
+                    "present": punch_count,
+                    "halfday": total_halfday,
+                    "late": total_late,
+                    "leave_summary": {
+                        "absent": leave_count,
+                        "paid_days": paid_days,
+                        "unpaid_days": unpaid_days
+                    },
+                    "jobInfo": job_info
+                },
+                "admin": {
+                    "bonus_policy": bonus_policy,
+                    "payroll_policy": payroll_policy,
+                    "leave_policy": leave_policy
+                },
+                "shift_policy": {
+                    "workingDays": working_days_list,
+                    "saturdayCondition": saturday_condition,
+                    "totalWorkingDaysThisMonth": total_working_days
+                }
+            }
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Failed to fetch salary details",
+            "error": str(e)
+        }), 500

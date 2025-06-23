@@ -1,4 +1,4 @@
-from models import SuperAdmin, SuperAdminPanel, db, PunchData, User, UserTicket, AdminLeave, AdminDoc, Announcement, AdminLeave, BonusPolicy, UserLeave, UserPanelData, ShiftTimeManagement, RemotePolicy, PayrollPolicy, Notice, TaskManagement, TaskUser, TaskComments, AdminDetail, Likes, AdminHoliday, ProductAsset, AdminDepartment, TicketAssignmentLog, UserAccess, UserPromotion, UserSalaryDetails
+from models import SuperAdmin, SuperAdminPanel, db, PunchData, User, UserTicket, AdminLeave, AdminDoc, Announcement, AdminLeave, BonusPolicy, UserLeave, UserPanelData, ShiftTimeManagement, RemotePolicy, PayrollPolicy, Notice, TaskManagement, TaskUser, TaskComments, AdminDetail, Likes, AdminHoliday, ProductAsset, AdminDepartment, TicketAssignmentLog, UserAccess, UserPromotion, UserSalaryDetails, UserChat, AdminLocation
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask import Blueprint, request, jsonify, g
 from middleware import create_tokens
@@ -12,8 +12,11 @@ import random
 import string
 import re, json
 import math, holidays
-import logging, calendar
+import logging, calendar, os
+from werkzeug.utils import secure_filename
 from socket_instance import socketio
+from flask import url_for
+
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -4173,5 +4176,230 @@ def delete_promotion(promotion_id):
         return jsonify({
             "status": "error",
             "message": "Internal Server Error",
+            "error": str(e)
+        }), 500
+
+
+# ====================================
+#      ADMIN MESSAGE SECTION         - admin will chat with users  
+# ====================================
+
+@superAdminBP.route('/message', methods=['POST'])
+def admin_send_message():
+    try:
+        superadminID = g.user.get('userID') if g.user else None
+        if not superadminID or g.user.get('userType') != 'superadmin':
+            return jsonify({"status": "error", "message": "Unauthorized"}), 403
+
+        superadmin = SuperAdmin.query.filter_by(id=superadminID).first()
+        if not superadmin:
+            return jsonify({"status": "error", "message": "Admin not found"}), 404
+
+        receiver_id = request.form.get('recieverID')
+        message_text = request.form.get('message')
+        uploaded_file = request.files.get('file')  # optional
+
+        if not receiver_id:
+            return jsonify({"status": "error", "message": "Receiver ID required"}), 400
+        if not message_text and not uploaded_file:
+            return jsonify({"status": "error", "message": "Message or file required"}), 400
+
+        user = User.query.filter_by(id=receiver_id).first()
+        if not user:
+            return jsonify({"status": "error", "message": "User not found"}), 404
+
+        file_url = None
+        message_type = 'text'
+
+        if uploaded_file:
+            filename = secure_filename(uploaded_file.filename)
+            mimetype = uploaded_file.mimetype
+            folder_path = os.path.join('static', 'uploads', 'chat_files')
+            os.makedirs(folder_path, exist_ok=True)
+            filepath = os.path.join(folder_path, filename)
+            uploaded_file.save(filepath)
+            file_url = filepath
+
+            if mimetype.startswith("image/"):
+                message_type = 'image' if not message_text else 'text_image'
+            else:
+                message_type = 'file' if not message_text else 'text_file'
+
+        message = UserChat(
+            panelData=user.panelData.id,
+            senderID=superadmin.empId,
+            recieverID=user.empId,
+            message=message_text if message_text else None,
+            image_url=file_url,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow()
+        )
+
+        db.session.add(message)
+        db.session.commit()
+
+        socketio.emit('receive_message', {
+            'senderID': superadmin.empId,
+            'recieverID': user.empId,
+            'message': message_text,
+            'file_url': file_url,
+            'message_type': message_type,
+            'timestamp': str(message.created_at)
+        }, room=receiver_id)
+
+        socketio.emit('message_sent', {'status': 'success'}, room=superadmin.empId)
+
+        return jsonify({"status": "success", "message": "Message sent"}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e)
+        }), 500
+
+@superAdminBP.route('/message/<string:with_empId>', methods=['GET'])
+def get_admin_chat(with_empId):
+    try:
+        superadminID = g.user.get('userID') if g.user else None
+        if not superadminID or g.user.get('userType') != 'superadmin':
+            return jsonify({"status": "error", "message": "Unauthorized"}), 403
+
+        superadmin = SuperAdmin.query.filter_by(id=superadminID).first()
+        if not superadmin or not superadmin.companyEmail:
+            return jsonify({"status": "error", "message": "Admin not found"}), 404
+
+        sender_empId = superadmin.companyEmail
+
+        chats = UserChat.query.filter(
+            ((UserChat.senderID == sender_empId) & (UserChat.recieverID == with_empId)) |
+            ((UserChat.senderID == with_empId) & (UserChat.recieverID == sender_empId))
+        ).order_by(UserChat.created_at.asc()).all()
+
+        messages = []
+        for chat in chats:
+            message_data = {
+                "id": chat.id,
+                "senderID": chat.senderID,
+                "receiverID": chat.recieverID,
+                "message": chat.message,
+                "image_url": None,
+                "message_type": "image" if chat.image_url and chat.image_url.lower().endswith(('.jpg', '.jpeg', '.png')) else (
+                    "file" if chat.image_url else "text"
+                ),
+                "created_at": chat.created_at.isoformat()
+            }
+
+            if chat.image_url:
+                message_data["image_url"] = url_for(
+                    'static', filename=chat.image_url.replace('static/', ''), _external=True
+                )
+
+            messages.append(message_data)
+
+        return jsonify({"status": "success", "messages": messages}), 200
+
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e)
+        }), 500
+
+
+
+# ====================================
+#      ADMIN MESSAGE SECTION         - admin set location of office  
+# ====================================
+
+
+@superAdminBP.route('/location', methods=['POST'])
+def set_admin_location():
+    try:
+        superadmin, err, status = get_authorized_superadmin()
+        if err:
+            return err, status
+
+        data = request.get_json()
+        if not data:
+            return jsonify({
+                "status": "error",
+                "message": "No data provided"
+            }), 400
+
+        latitude = data.get('latitude')
+        longitude = data.get('longitude')
+
+        if not latitude or not longitude:
+            return jsonify({
+                "status": "error",
+                "message": "Latitude and longitude are required"
+            }), 400
+
+        # Check if location already exists for this superpanel
+        existing_location = AdminLocation.query.filter_by(superpanel=superadmin.superadminPanel.id).first()
+
+        if existing_location:
+            existing_location.latitude = latitude
+            existing_location.longitude = longitude
+            message = "Location updated successfully"
+        else:
+            new_location = AdminLocation(
+                superpanel=superadmin.superadminPanel.id,
+                latitude=latitude,
+                longitude=longitude
+            )
+            db.session.add(new_location)
+            message = "Location saved successfully"
+
+        db.session.commit()
+
+        return jsonify({
+            "status": "success",
+            "message": message,
+            "data": {
+                "latitude": latitude,
+                "longitude": longitude
+            }
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Failed to save location",
+            "error": str(e)
+        }), 500
+
+
+@superAdminBP.route('/location', methods=['GET'])
+def get_admin_location():
+    try:
+        superadmin, err, status = get_authorized_superadmin()
+        if err:
+            return err, status
+
+        location = AdminLocation.query.filter_by(superpanel=superadmin.superadminPanel.id).first()
+
+        if not location:
+            return jsonify({
+                "status": "error",
+                "message": "Location not set"
+            }), 404
+
+        return jsonify({
+            "status": "success",
+            "message": "Location fetched successfully",
+            "data": {
+                "latitude": location.latitude,
+                "longitude": location.longitude
+            }
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": "Failed to fetch location",
             "error": str(e)
         }), 500

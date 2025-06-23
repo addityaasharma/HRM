@@ -54,7 +54,15 @@ class SuperAdminPanel(db.Model):
     adminTaskManagement = db.relationship('TaskManagement', backref='superadminpanel', lazy=True)
     adminHolidays = db.relationship('AdminHoliday', backref='superadminpanel', lazy=True)
     adminDepartment = db.relationship('AdminDepartment', backref='superadminpanel', lazy=True)
+    adminLocation = db.relationship('AdminLocation', backref='superadminpanel', lazy=True, uselist=False)
 
+
+class AdminLocation(db.Model):
+    __tablename__ = 'adminlocation'
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    superpanel =  db.Column(db.Integer, db.ForeignKey('superadminpanel.id'), nullable=False)
+    latitude = db.Column(db.String(255))
+    longitude = db.Column(db.String(255))
 
 class AdminDepartment(db.Model):
     __tablename__ = 'department'
@@ -390,7 +398,7 @@ class UserChat(db.Model):
     panelData = db.Column(db.Integer, db.ForeignKey('userpaneldata.id'), nullable=False)
     senderID = db.Column(db.String(120),nullable=False)
     recieverID = db.Column(db.String(120), nullable=False)
-    message = db.Column(db.Text, nullable=False)
+    message = db.Column(db.Text, nullable=True)
     image_url = db.Column(db.String(255))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
