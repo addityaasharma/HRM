@@ -11,6 +11,7 @@ class Master(db.Model):
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     name = db.Column(db.String(100), nullable=False)
     company_email = db.Column(db.String(120), nullable=False)
+    company_password = db.Column(db.String(120), nullable=False)
     # admins = db.relationship('SuperAdmin', backref='master', lazy=True)
 
 # ====================================

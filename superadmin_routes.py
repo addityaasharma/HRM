@@ -1542,7 +1542,7 @@ def editleave(id):
         def str_to_bool(val):
             return str(val).lower() in ['true', '1', 'yes']
 
-        leave.leaveStatus = data.get('leaveStatus', leave.leaveStatus)
+        # leave.leaveStatus = data.get('leaveStatus', leave.leaveStatus)
         leave.leaveType = data.get('leaveType', leave.leaveType)
         leave.calculationType = data.get('calculationType', leave.calculationType)
         leave.probation = str_to_bool(data.get('probation', leave.probation))
@@ -3747,16 +3747,24 @@ def get_all_user_admin_data():
         for user in users:
             panel_data = user.panelData
 
-            # --- Punch count this month ---
             punch_count = 0
+            total_halfday = 0
+            total_late = 0
             if panel_data:
-                punch_count = db.session.query(PunchData).filter(
+                punch_query = db.session.query(PunchData).filter(
                     PunchData.panelData == panel_data.id,
                     PunchData.login >= month_start,
                     PunchData.login <= month_end
-                ).count()
+                )
+                punch_count = punch_query.count()
 
-            # --- Leave details this month ---
+                punch_records = punch_query.with_entities(PunchData.status).all()
+                for status in punch_records:
+                    if status[0] == 'halfday':
+                        total_halfday += 1
+                    elif status[0] == 'late':
+                        total_late += 1
+
             paid_days = 0
             unpaid_days = 0
             leave_count = 0
@@ -3774,14 +3782,12 @@ def get_all_user_admin_data():
                     unpaid_days += unpaid
                     paid_days += max((leave.days or 0) - unpaid, 0)
 
-            # --- Job info ---
             job_info = {
                 "department": panel_data.userJobInfo[0].department if panel_data and panel_data.userJobInfo else None,
                 "designation": panel_data.userJobInfo[0].designation if panel_data and panel_data.userJobInfo else None,
                 "joiningDate": panel_data.userJobInfo[0].joiningDate.isoformat() if panel_data and panel_data.userJobInfo and panel_data.userJobInfo[0].joiningDate else None
             }
 
-            # --- Basic Salary ---
             basic_salary = panel_data.userSalaryDetails[0].basic_salary if panel_data and panel_data.userSalaryDetails else None
 
             user_data_list.append({
@@ -3791,6 +3797,8 @@ def get_all_user_admin_data():
                 "role": user.userRole,
                 "basic_salary": user.currentSalary,
                 "present": punch_count,
+                "halfday": total_halfday,
+                "late": total_late,
                 "leave_summary": {
                     "absent": leave_count,
                     "paid_days": paid_days,
@@ -3799,7 +3807,6 @@ def get_all_user_admin_data():
                 "jobInfo": job_info
             })
 
-        # --- Admin-Side Info ---
         admin_panel = superadmin.superadminPanel
 
         bonus_policy = [{
@@ -3838,7 +3845,7 @@ def get_all_user_admin_data():
         } for l in admin_panel.adminLeave]
 
         shift = ShiftTimeManagement.query.filter_by(
-            superpanel = admin_panel.id,
+            superpanel=admin_panel.id,
             shiftStatus=True
         ).first()
 
@@ -3848,7 +3855,6 @@ def get_all_user_admin_data():
 
         if working_days_list:
             working_days_set = set(day.lower() for day in working_days_list)
-
             month_range = calendar.monthrange(today.year, today.month)[1]
             for day in range(1, month_range + 1):
                 date = datetime(today.year, today.month, day).date()
@@ -3857,7 +3863,7 @@ def get_all_user_admin_data():
                 if weekday == 'saturday':
                     if saturday_condition:
                         week_no = (day - 1) // 7 + 1
-                        if(
+                        if (
                             (saturday_condition == 'All Saturdays Working') or
                             (saturday_condition == 'First & Third Saturdays Working' and week_no in [1, 3]) or
                             (saturday_condition == 'Second & Fourth Saturdays Working' and week_no in [2, 4]) or
@@ -3876,7 +3882,7 @@ def get_all_user_admin_data():
                     "payroll_policy": payroll_policy,
                     "leave_policy": leave_policy
                 },
-                "shift_policy" : {
+                "shift_policy": {
                     "workingDays": working_days_list,
                     "saturdayCondition": saturday_condition,
                     "totalWorkingDaysThisMonth": total_working_days

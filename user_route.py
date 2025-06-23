@@ -921,7 +921,7 @@ def editTicket(ticket_id):
 
         db.session.commit()
 
-        admin = user.superadmin
+        admin = SuperAdmin.query.filter_by(superId=user.superadminId).first()
         user_ticket_owner = User.query.filter_by(empId=ticket.userId).first()
 
         if notify_status_change:
@@ -1710,8 +1710,8 @@ def request_leave():
                 "title": "New Leave Request",
                 "message": f"{user.userName} has requested leave from {leaveStart} to {leaveEnd}",
                 "empId": user.empId,
-                "days": totalDays,
-                "unpaidDays": unpaidDays,
+                "days": int(totalDays),
+                "unpaidDays": int(unpaidDays),
                 "leaveType": leavetype
             },
             room=superadmin.companyEmail
