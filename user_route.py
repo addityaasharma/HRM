@@ -2927,13 +2927,12 @@ def get_user_salary_details():
         month_start = today.replace(day=1)
         month_end = today.replace(day=31) if today.month == 12 else (today.replace(month=today.month + 1, day=1) - timedelta(days=1))
 
-        # --- Punch Data ---
+        # Punch Data
         punch_query = db.session.query(PunchData).filter(
             PunchData.panelData == panel_data.id,
             PunchData.login >= month_start,
             PunchData.login <= month_end
         )
-
         punch_count = punch_query.count()
         total_halfday = 0
         total_late = 0
@@ -2943,47 +2942,41 @@ def get_user_salary_details():
             elif status[0] == 'late':
                 total_late += 1
 
-        # --- Leave Info ---
+        # Leave Info
         paid_days = 0
         unpaid_days = 0
         leave_count = 0
-
         leaves = db.session.query(UserLeave).filter(
             UserLeave.panelData == panel_data.id,
             UserLeave.status == 'approved',
             UserLeave.leavefrom >= month_start,
             UserLeave.leavefrom <= month_end
         ).all()
-
         leave_count = len(leaves)
         for leave in leaves:
             unpaid = leave.unpaidDays or 0
             unpaid_days += unpaid
             paid_days += max((leave.days or 0) - unpaid, 0)
 
-        # --- Job & Salary Info ---
+        # Job Info
         job_info = {
             "department": panel_data.userJobInfo[0].department if panel_data.userJobInfo else None,
-            # "designation": panel_data.userJobInfo[0].designation if panel_data.userJobInfo else None,
-            # "joiningDate": panel_data.userJobInfo[0].joiningDate.isoformat() if panel_data.userJobInfo and panel_data.userJobInfo[0].joiningDate else None
         }
 
-        current_salary = user.currentSalary
-
-        # --- Admin Info ---
+        # Admin Info
         superadmin = SuperAdmin.query.filter_by(superId=user.superadminId).first()
         admin_panel = superadmin.superadminPanel if superadmin else None
 
-        bonus_policy = [ {
+        bonus_policy = [{
             "bonus_name": b.bonus_name,
             "amount": b.amount,
             "bonus_method": b.bonus_method,
             "apply": b.apply,
             "employeement_type": b.employeement_type,
             "department_type": b.department_type
-        } for b in admin_panel.adminBonusPolicy ] if admin_panel else []
+        } for b in admin_panel.adminBonusPolicy] if admin_panel else []
 
-        payroll_policy = [ {
+        payroll_policy = [{
             "policyname": p.policyname,
             "calculation_method": p.calculation_method,
             "overtimePolicy": p.overtimePolicy,
@@ -2993,9 +2986,9 @@ def get_user_salary_details():
             "disbursement": p.disbursement.isoformat() if p.disbursement else None,
             "employeementType": p.employeementType,
             "departmentType": p.departmentType
-        } for p in admin_panel.adminPayrollPolicy ] if admin_panel else []
+        } for p in admin_panel.adminPayrollPolicy] if admin_panel else []
 
-        leave_policy = [ {
+        leave_policy = [{
             "leaveName": l.leaveName,
             "leaveType": l.leaveType,
             "probation": l.probation,
@@ -3007,14 +3000,14 @@ def get_user_salary_details():
             "max_leave_once": l.max_leave_once,
             "max_leave_year": l.max_leave_year,
             "monthly_leave_limit": l.monthly_leave_limit
-        } for l in admin_panel.adminLeave ] if admin_panel else []
+        } for l in admin_panel.adminLeave] if admin_panel else []
 
         shift = ShiftTimeManagement.query.filter_by(
             superpanel=admin_panel.id,
             shiftStatus=True
         ).first() if admin_panel else None
 
-        # --- Calculate Total Working Days ---
+        # Working Days Calculation
         total_working_days = 0
         working_days_list = shift.workingDays if shift and shift.workingDays else []
         saturday_condition = shift.saturdayCondition if shift and shift.saturdayCondition else None
@@ -3041,12 +3034,12 @@ def get_user_salary_details():
         return jsonify({
             "status": "success",
             "data": {
-                "user": {
+                "users": [{
                     "empId": user.empId,
                     "name": user.userName,
                     "email": user.email,
                     "role": user.userRole,
-                    "basic_salary": current_salary,
+                    "basic_salary": user.currentSalary,
                     "present": punch_count,
                     "halfday": total_halfday,
                     "late": total_late,
@@ -3056,6 +3049,12 @@ def get_user_salary_details():
                         "unpaid_days": unpaid_days
                     },
                     "jobInfo": job_info
+                }],
+                "pagination": {
+                    "page": 1,
+                    "limit": 1,
+                    "total": 1,
+                    "totalPages": 1
                 },
                 "admin": {
                     "bonus_policy": bonus_policy,
@@ -3077,6 +3076,7 @@ def get_user_salary_details():
             "message": "Failed to fetch salary details",
             "error": str(e)
         }), 500
+
 
 
 # ====================================

@@ -4351,7 +4351,7 @@ def get_admin_chat(with_empId):
 
 
 # ====================================
-#      ADMIN MESSAGE SECTION         - admin set location of office  
+#      ADMIN LOCATION SECTION         - admin set location of office  
 # ====================================
 
 
