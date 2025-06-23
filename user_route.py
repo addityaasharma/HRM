@@ -1,21 +1,22 @@
-from models import User,UserPanelData,db,SuperAdmin,PunchData, UserTicket, UserDocument, UserChat, UserLeave, ShiftTimeManagement, Announcement, Likes, Comments, Notice, ProductAsset, TaskUser ,TaskComments, TaskManagement, TicketAssignmentLog, UserSalary, UserPromotion, JobInfo
+from models import User,UserPanelData,db,SuperAdmin,PunchData, UserTicket, UserDocument, UserChat, UserLeave, ShiftTimeManagement, Announcement, Likes, Comments, Notice, ProductAsset, TaskUser ,TaskComments, TaskManagement, TicketAssignmentLog, UserSalary, UserPromotion, JobInfo, AdminLocation
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask import Blueprint, request, json, jsonify, g
 from datetime import datetime,time, timedelta
 from otp_utils import generate_otp, send_otp
 from flask_socketio import join_room, emit
+from werkzeug.utils import secure_filename
 from sqlalchemy import func, extract, and_
+from sqlalchemy.orm import joinedload
 from socket_instance import socketio
 from middleware import create_tokens
 from dotenv import load_dotenv
 from config import cloudinary
 import cloudinary.uploader
+from flask import url_for
 from redis import Redis
 import random,os
+from dateutil import parser
 import string, math
-from sqlalchemy.orm import joinedload
-from flask import url_for
-from werkzeug.utils import secure_filename
 import os, calendar
 
 
@@ -226,7 +227,9 @@ def punch_details():
             return jsonify({'status': 'error', 'message': 'User panel data not found'}), 404
 
         try:
-            login_time = datetime.fromisoformat(login)
+            login_time = parser.isoparse(login)
+            if login_time.tzinfo:
+                login_time = login_time.replace(tzinfo=None)
         except Exception:
             return jsonify({'status': 'error', 'message': 'Invalid login time format'}), 400
 
@@ -348,7 +351,7 @@ def get_punchDetails():
             return jsonify({
                 "status": "error",
                 "message": "No punch records found"
-            }), 404
+            }), 200
 
         punch_list = []
         for punch in punchdetails:
@@ -399,8 +402,10 @@ def edit_punchDetails(punchId):
         }), 400
 
     try:
+        # Parse logout time (handle Zulu time format from frontend)
         logout_time = datetime.fromisoformat(data.get('logout').replace('Z', '+00:00'))
 
+        # Parse totalHour string to time object
         total_hour_str = data.get('totalHour')
         try:
             h, m, s = map(int, total_hour_str.strip().split(':'))
@@ -451,14 +456,18 @@ def edit_punchDetails(punchId):
                 "message": f"No active {user.shift} shift set by admin"
             }), 404
 
+        # Make sure shiftEnd is a time object
+        shift_end = shift.shiftEnd
+        if isinstance(shift_end, datetime):
+            shift_end = shift_end.time()
+
         logout_date = logout_time.date()
-        shift_end_time = datetime.combine(logout_date, shift.shiftEnd)
+        shift_end_time = datetime.combine(logout_date, shift_end)
 
-        if logout_time < shift_end_time:
-            punch_status = 'halfday'
-        else:
-            punch_status = 'fullday'
+        # Determine punch status
+        punch_status = 'halfday' if logout_time < shift_end_time else 'fullday'
 
+        # Update punch data
         punchdata.logout = logout_time
         punchdata.location = data['location']
         punchdata.totalhour = total_hour_time
@@ -567,7 +576,6 @@ def get_Profile():
         }), 500
 
 
-
 @user.route('/profile', methods=['PUT'])
 def edit_Profile():
     try:
@@ -631,7 +639,7 @@ def edit_Profile():
 
 
 # ====================================
-#        USER TICKET SECTION
+#        USER TICKET SECTION 
 # ====================================
 
 

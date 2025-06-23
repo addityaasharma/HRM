@@ -1,21 +1,21 @@
 from models import SuperAdmin, SuperAdminPanel, db, PunchData, User, UserTicket, AdminLeave, AdminDoc, Announcement, AdminLeave, BonusPolicy, UserLeave, UserPanelData, ShiftTimeManagement, RemotePolicy, PayrollPolicy, Notice, TaskManagement, TaskUser, TaskComments, AdminDetail, Likes, AdminHoliday, ProductAsset, AdminDepartment, TicketAssignmentLog, UserAccess, UserPromotion, UserSalaryDetails, UserChat, AdminLocation
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask import Blueprint, request, jsonify, g
+from werkzeug.utils import secure_filename
+from datetime import datetime, timedelta
+from socket_instance import socketio
 from middleware import create_tokens
 from datetime import datetime, date
 from config import cloudinary
+import logging, calendar, os
 from sqlalchemy import desc
 from dateutil import parser
 import cloudinary.uploader
-from datetime import datetime, timedelta
-import random
-import string
-import re, json
-import math, holidays
-import logging, calendar, os
-from werkzeug.utils import secure_filename
-from socket_instance import socketio
 from flask import url_for
+import math, holidays
+import re, json
+import random 
+import string
 
 
 logging.basicConfig(level=logging.INFO)
@@ -1003,6 +1003,8 @@ def editEmployee(id):
         db.session.rollback()
         return jsonify({"status" : "error", "message" : "Internal Server Error", "error" : str(e)})
 
+
+
 # ====================================
 #         USER TICKET SECTION - get all tickets from the user side and update it.         
 # ====================================
@@ -1300,6 +1302,7 @@ def get_assigned_tickets():
         }), 500
 
 
+
 # ====================================
 #     USER LEAVE CONTROL SECTION  - can control all leaves request and can also view and edit       
 # ====================================
@@ -1461,6 +1464,7 @@ def update_user_leave_status(leave_id):
             "message": "Internal Server Error",
             "error": str(e)
         }), 500
+
 
 
 # ====================================
@@ -1636,6 +1640,7 @@ def delete_leave(id):
         }), 500
 
 
+
 # ====================================
 #         DOCUMENT SECTION      - admin all documents 
 # ====================================
@@ -1761,6 +1766,7 @@ def delete_details(id):
     except Exception as e:
         db.session.rollback()
         return jsonify({"status": "error", "message": "Internal Server Error", "error": str(e)}), 500
+
 
 
 # ====================================
@@ -1978,6 +1984,7 @@ def get_announcement():
         }), 500
 
 
+
 # ====================================
 #         BONUS SECTION              - admin bonus section where admin can create his own bonus policies  
 # ====================================
@@ -2167,6 +2174,7 @@ def delete_bonus(id):
             "message": "Internal Server Error",
             "error": str(e)
         }), 500
+
 
 
 # ====================================
@@ -2415,6 +2423,7 @@ def edit_shift_policy(shift_id):
 
 
 
+
 # ====================================
 #      REMOTE WORK SECTION         - admin can also set remote work polciy
 # ====================================
@@ -2546,6 +2555,8 @@ def delete_remote_work(id):
     except Exception as e:
         db.session.rollback()
         return jsonify({"status": "error", "message": str(e)}), 500
+
+
 
 
 # ====================================
@@ -2719,6 +2730,8 @@ def delete_payroll(id):
         return jsonify({"status": "error", "message": "Server error", "error": str(e)}), 500
 
 
+
+
 # ====================================
 #          NOTICE SECTION         - admin can create notice 
 # ====================================
@@ -2839,6 +2852,8 @@ def delete_notice(notice_id):
         }), 500
 
 
+
+
 # ====================================
 #      EMPLOYEE DOC SECTION           - admin can view employee docs
 # ====================================
@@ -2912,6 +2927,7 @@ def get_employee_documents():
             "message": "Internal Server error",
             "error": str(e),
         }), 500
+
 
 
 
@@ -3208,6 +3224,8 @@ def update_project(task_id):
         }), 500
 
 
+
+
 # ====================================
 #      CELEBRATION SECTION           -  admin can view upcoming birthdays of all users
 # ====================================
@@ -3270,6 +3288,8 @@ def get_upcoming_birthdays():
             "message": "Internal Server Error",
             "error": str(e),
         }), 500
+
+
 
 # ====================================
 #        HOLIDAY SECTION           -  admin can set, view and change holidays 
@@ -3458,6 +3478,8 @@ def toggle_holiday(holiday_id):
         }), 500
 
 
+
+
 # ====================================
 #        ASSETS SECTION           -  admin can get assets request from the user and can also edit
 # ====================================
@@ -3586,6 +3608,8 @@ def update_asset_status(asset_id):
             "message": "Internal Server Error",
             "error": str(e)
         }), 500
+
+
 
 
 # ====================================
@@ -3724,6 +3748,7 @@ def get_departments_with_users():
 
 
 
+
 # ====================================
 #      SALARY SECTION           -  admin will get calculated salary of all users
 # ====================================
@@ -3806,8 +3831,8 @@ def get_all_user_admin_data():
             # --- Job & Salary Info ---
             job_info = {
                 "department": panel_data.userJobInfo[0].department if panel_data and panel_data.userJobInfo else None,
-                "designation": panel_data.userJobInfo[0].designation if panel_data and panel_data.userJobInfo else None,
-                "joiningDate": panel_data.userJobInfo[0].joiningDate.isoformat() if panel_data and panel_data.userJobInfo and panel_data.userJobInfo[0].joiningDate else None
+                # "designation": panel_data.userJobInfo[0].designation if panel_data and panel_data.userJobInfo else None,
+                # "joiningDate": panel_data.userJobInfo[0].joiningDate.isoformat() if panel_data and panel_data.userJobInfo and panel_data.userJobInfo[0].joiningDate else None
             }
 
             user_data_list.append({
@@ -4070,6 +4095,8 @@ def get_user_salaries():
         }), 500
 
 
+
+
 # ====================================
 #      PROMOTION SECTION         - admin will set promotion of particular users  
 # ====================================
@@ -4178,6 +4205,8 @@ def delete_promotion(promotion_id):
             "message": "Internal Server Error",
             "error": str(e)
         }), 500
+
+
 
 
 # ====================================
@@ -4308,6 +4337,8 @@ def get_admin_chat(with_empId):
             "message": "Internal Server Error",
             "error": str(e)
         }), 500
+
+
 
 
 # ====================================
