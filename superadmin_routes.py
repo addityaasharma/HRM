@@ -3268,7 +3268,6 @@ def get_upcoming_birthdays():
             "error": str(e),
         }), 500
 
-
 # ====================================
 #        HOLIDAY SECTION           
 # ====================================
@@ -3414,7 +3413,7 @@ def get_holiday():
             "message": "Internal Server Error",
             "error": str(e),
         }), 500
-    
+
 
 @superAdminBP.route('/holiday/<int:holiday_id>', methods=['PUT'])
 def toggle_holiday(holiday_id):
@@ -3736,17 +3735,38 @@ def get_all_user_admin_data():
 
         today = datetime.utcnow().date()
         month_start = today.replace(day=1)
-        if today.month == 12:
-            month_end = today.replace(day=31)
-        else:
-            month_end = (today.replace(month=today.month + 1, day=1) - timedelta(days=1))
+        month_end = today.replace(day=31) if today.month == 12 else (today.replace(month=today.month + 1, day=1) - timedelta(days=1))
 
-        users = User.query.filter_by(superadminId=superadmin.superId).all()
+        # --- Query Parameters ---
+        search_name = request.args.get('name', '').strip().lower()
+        search_department = request.args.get('department', '').strip().lower()
+        page = int(request.args.get('page', 1))
+        limit = int(request.args.get('limit', 10))
+        offset = (page - 1) * limit
+
+        # --- Base Query ---
+        user_query = User.query.filter_by(superadminId=superadmin.superId)
+        if search_name:
+            user_query = user_query.filter(func.lower(User.userName).like(f"%{search_name}%"))
+
+        # --- Total Before Pagination ---
+        total_users = user_query.count()
+
+        # --- Apply Pagination ---
+        users = user_query.offset(offset).limit(limit).all()
         user_data_list = []
 
         for user in users:
             panel_data = user.panelData
 
+            # --- Skip if department doesn't match ---
+            if search_department and (
+                not panel_data or not panel_data.userJobInfo or
+                panel_data.userJobInfo[0].department.lower() != search_department
+            ):
+                continue
+
+            # --- Punch Info ---
             punch_count = 0
             total_halfday = 0
             total_late = 0
@@ -3757,14 +3777,13 @@ def get_all_user_admin_data():
                     PunchData.login <= month_end
                 )
                 punch_count = punch_query.count()
-
-                punch_records = punch_query.with_entities(PunchData.status).all()
-                for status in punch_records:
+                for status in punch_query.with_entities(PunchData.status).all():
                     if status[0] == 'halfday':
                         total_halfday += 1
                     elif status[0] == 'late':
                         total_late += 1
 
+            # --- Leave Info ---
             paid_days = 0
             unpaid_days = 0
             leave_count = 0
@@ -3775,20 +3794,18 @@ def get_all_user_admin_data():
                     UserLeave.leavefrom >= month_start,
                     UserLeave.leavefrom <= month_end
                 ).all()
-
                 leave_count = len(leaves)
                 for leave in leaves:
                     unpaid = leave.unpaidDays or 0
                     unpaid_days += unpaid
                     paid_days += max((leave.days or 0) - unpaid, 0)
 
+            # --- Job & Salary Info ---
             job_info = {
                 "department": panel_data.userJobInfo[0].department if panel_data and panel_data.userJobInfo else None,
                 "designation": panel_data.userJobInfo[0].designation if panel_data and panel_data.userJobInfo else None,
                 "joiningDate": panel_data.userJobInfo[0].joiningDate.isoformat() if panel_data and panel_data.userJobInfo and panel_data.userJobInfo[0].joiningDate else None
             }
-
-            basic_salary = panel_data.userSalaryDetails[0].basic_salary if panel_data and panel_data.userSalaryDetails else None
 
             user_data_list.append({
                 "empId": user.empId,
@@ -3807,6 +3824,7 @@ def get_all_user_admin_data():
                 "jobInfo": job_info
             })
 
+        # --- Admin Policies ---
         admin_panel = superadmin.superadminPanel
 
         bonus_policy = [{
@@ -3859,7 +3877,6 @@ def get_all_user_admin_data():
             for day in range(1, month_range + 1):
                 date = datetime(today.year, today.month, day).date()
                 weekday = date.strftime("%A").lower()
-
                 if weekday == 'saturday':
                     if saturday_condition:
                         week_no = (day - 1) // 7 + 1
@@ -3877,6 +3894,12 @@ def get_all_user_admin_data():
             "status": "success",
             "data": {
                 "users": user_data_list,
+                "pagination": {
+                    "page": page,
+                    "limit": limit,
+                    "total": total_users,
+                    "totalPages": (total_users + limit - 1) // limit
+                },
                 "admin": {
                     "bonus_policy": bonus_policy,
                     "payroll_policy": payroll_policy,
