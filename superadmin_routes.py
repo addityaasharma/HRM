@@ -1,4 +1,4 @@
-from models import SuperAdmin, SuperAdminPanel, db, PunchData, User, UserTicket, AdminLeave, AdminDoc, Announcement, AdminLeave, BonusPolicy, UserLeave, UserPanelData, ShiftTimeManagement, RemotePolicy, PayrollPolicy, Notice, TaskManagement, TaskUser, TaskComments, AdminDetail, Likes, AdminHoliday, ProductAsset, AdminDepartment, TicketAssignmentLog, UserAccess
+from models import SuperAdmin, SuperAdminPanel, db, PunchData, User, UserTicket, AdminLeave, AdminDoc, Announcement, AdminLeave, BonusPolicy, UserLeave, UserPanelData, ShiftTimeManagement, RemotePolicy, PayrollPolicy, Notice, TaskManagement, TaskUser, TaskComments, AdminDetail, Likes, AdminHoliday, ProductAsset, AdminDepartment, TicketAssignmentLog, UserAccess, UserPromotion, UserSalaryDetails
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask import Blueprint, request, jsonify, g
 from middleware import create_tokens
@@ -12,7 +12,8 @@ import random
 import string
 import re, json
 import math, holidays
-import logging
+import logging, calendar
+from socket_instance import socketio
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -216,7 +217,7 @@ def superadmin_login():
 
 
     user = User.query.filter_by(email=email).first()
-    if user and user.userRole.lower() == 'hr':
+    if user and not user.userRole.lower() == 'hr':
         if not check_password_hash(user.password, password):  # Assumes User model has `password` field
             return jsonify({
                 'status': 'error',
@@ -642,6 +643,18 @@ def all_users_or_one(id):
             if not single_user:
                 return jsonify({'status': 'error', 'message': 'User not found'}), 404
 
+            user_promotions = []
+            if single_user.panelData:
+                user_promotions = [{
+                    "id": promo.id,
+                    "empId": promo.empId,
+                    "new_designation": promo.new_designation,
+                    "previous_department": promo.previous_department,
+                    "new_department": promo.new_department,
+                    "description": promo.description,
+                    "dateofpromotion": promo.dateofpromotion.strftime("%Y-%m-%d") if promo.dateofpromotion else None
+                } for promo in single_user.panelData.UserPromotion]
+
             user_data = {
                 'id': single_user.id,
                 'profileImage': single_user.profileImage,
@@ -657,7 +670,7 @@ def all_users_or_one(id):
                 'city': single_user.city,
                 'state': single_user.state,
                 'country': single_user.country,
-                'birthday': single_user.birthday,
+                'birthday': single_user.birthday.strftime("%Y-%m-%d"),
                 'nationality': single_user.nationality,
                 'panNumber': single_user.panNumber,
                 'adharNumber': single_user.adharNumber,
@@ -681,13 +694,14 @@ def all_users_or_one(id):
                 'managerId': single_user.managerId,
                 'superadmin_panel_id': single_user.superadmin_panel_id,
                 'created_at': single_user.created_at.strftime("%Y-%m-%d %H:%M:%S") if single_user.created_at else None,
-                'access': get_user_access_list(single_user)
+                'access': get_user_access_list(single_user),
+                'promotions': user_promotions
             }
 
             return jsonify({'status': 'success', 'user': user_data}), 200
 
         department = request.args.get('department')
-        if department:
+        if department and department.lower() != 'all':
             all_users_query = [user for user in all_users_query if user.department and user.department.lower() == department.lower()]
 
         search_query = request.args.get('query')
@@ -717,7 +731,7 @@ def all_users_or_one(id):
                 'city': user.city,
                 'state': user.state,
                 'country': user.country,
-                'birthday': user.birthday,
+                'birthday': user.birthday.strftime("%Y-%m-%d") if user.birthday else None,
                 'nationality': user.nationality,
                 'panNumber': user.panNumber,
                 'adharNumber': user.adharNumber,
@@ -746,18 +760,24 @@ def all_users_or_one(id):
             for user in paginated_users
         ]
 
+        # total_users = len(all_users_query)
+        male_count = sum(1 for user in all_users_query if user.gender and user.gender.lower() == "male")
+        female_count = sum(1 for user in all_users_query if user.gender and user.gender.lower() == "female")
+
         return jsonify({
             'status': 'success',
             'page': page,
             'limit': limit,
             'total_users': total_users,
             'total_pages': (total_users + limit - 1) // limit,
-            'users': user_list
+            'users': user_list,
+            'males': male_count,
+            'females': female_count
         }), 200
 
     except Exception as e:
         db.session.rollback()
-        return jsonify({'status': 'error', 'message': 'Internal server error', 'error': str(e)}), 500
+        return jsonify({'status': 'error', 'message': 'Internal Server Error', 'error': str(e)}), 500
 
 
 @superAdminBP.route('/all-users/<int:userId>', methods=['PUT'])
@@ -790,11 +810,11 @@ def edit_user(userId):
             'fieldOfStudy', 'dateOfCompletion', 'skills', 'occupation',
             'company', 'experience', 'duration', 'shift', 'birthday'
         ]
-        integer_fields = ['currentSalary', 'experience']
+        integer_fields = ['currentSalary', 'experience', 'number']
         date_fields = ['dateOfCompletion']
         datetime_fields = ['joiningDate', 'birthday']
         string_fields = [
-            'profileImage', 'userName', 'gender', 'number', 'currentAddress',
+            'profileImage', 'userName', 'gender', 'currentAddress',
             'permanentAddress', 'postal', 'city', 'state', 'country', 'nationality',
             'panNumber', 'adharNumber', 'uanNumber', 'department', 'onBoardingStatus',
             'sourceOfHire', 'schoolName', 'degree', 'fieldOfStudy', 'occupation',
@@ -1131,8 +1151,14 @@ def editTicket(ticket_id):
         user = User.query.filter_by(id=userID).first()
         is_superadmin = superadmin.id == userID if superadmin else False
 
-        if 'status' in data:
+        # Track original assigned user
+        old_assignee_empId = ticket.assigned_to_empId
+        status_changed = False
+
+        if 'status' in data and data['status'] != ticket.status:
             ticket.status = data['status']
+            status_changed = True
+
         if 'problem' in data:
             ticket.problem = data['problem']
 
@@ -1149,10 +1175,29 @@ def editTicket(ticket_id):
                     assigned_to_empId=new_assignee_empId
                 )
                 db.session.add(log)
-
                 ticket.assigned_to_empId = new_assignee_empId
 
+                socketio.emit(
+                    'ticket_assigned',
+                    {
+                        'ticket_id': ticket.id,
+                        'message': f"You have been assigned ticket #{ticket.id}"
+                    },
+                    room=new_assignee_empId
+                )
+
         db.session.commit()
+
+        if status_changed and ticket.assigned_to_empId:
+            socketio.emit(
+                'ticket_status_update',
+                {
+                    'ticket_id': ticket.id,
+                    'new_status': ticket.status,
+                    'message': f"Status of your ticket #{ticket.id} changed to '{ticket.status}'"
+                },
+                room=ticket.assigned_to_empId
+            )
 
         return jsonify({
             'status': 'success',
@@ -1384,7 +1429,18 @@ def update_user_leave_status(leave_id):
         
         db.session.commit()
         db.session.refresh(leave)
-        
+
+        socketio.emit(
+            'leave_changes',
+            {
+                "title": "Leave Status Updated",
+                "message": f"Your leave request from {leave.leavefrom} to {leave.leaveto} has been {leave.status}.",
+                "status": leave.status,
+                "leaveId": leave.id,
+                "empId": leave.empId
+            },
+            room = leave.empId
+        )
         print(f"New status: {leave.status}, {leave.id}")
 
         return jsonify({
@@ -1794,6 +1850,15 @@ def create_announcement():
         db.session.add(announcement)
         db.session.commit()
 
+        socketio.emit(
+            'notification',
+            {
+                'title': 'New Announcement 📣',
+                'message': 'A new announcement has been published by your admin.',
+            },
+            room=f"panel_{superadmin.superadminPanel.id}"
+        )
+
         return jsonify({"status": "success", "message": "Announcement created successfully"}), 201
 
     except Exception as e:
@@ -2127,6 +2192,8 @@ def addshift():
 
         shift_type = data['shiftType']
         shift_status = bool(data['shiftStatus'])
+        working_days = data.get('workingDays')
+        saturday_condition = data.get('saturdayCondition')
 
         if shift_status:
             existing_active_shift = ShiftTimeManagement.query.filter_by(
@@ -2157,6 +2224,8 @@ def addshift():
             Biometric=data.get('Biometric', False),
             RemoteCheckIn=data.get('RemoteCheckIn', False),
             ShiftSwap=data.get('ShiftSwap', False),
+            workingDays=working_days if isinstance(working_days, list) else None,
+            saturdayCondition=saturday_condition,
             superpanel=superadmin.superadminPanel.id
         )
 
@@ -2644,9 +2713,18 @@ def add_notice():
         db.session.add(new_notice)
         db.session.commit()
 
+        socketio.emit(
+            'notification',
+            {
+                'title': '📌 New Notice',
+                'message': data['notice']
+            },
+            room=f"panel_{superadmin.superadminPanel.id}"
+        )
+
         return jsonify({
             "status": "success",
-            "message": "Notice added successfully"
+            "message": "Notice added and notification sent successfully"
         }), 201
 
     except Exception as e:
@@ -2865,7 +2943,6 @@ def add_Project():
         assigned_users = []
 
         for emp_id in emp_ids:
-            print(f"Checking emp_id: {emp_id}")
             user = User.query.filter_by(empId=emp_id).first()
             if not user:
                 continue
@@ -2879,6 +2956,17 @@ def add_Project():
                     image=getattr(user, 'profileImage', '')
                 )
                 db.session.add(task_user)
+
+                socketio.emit(
+                    'notification',
+                    {
+                        'title': '📌 New Project Assigned',
+                        'message': f'You have been assigned to project: {title}',
+                        'taskId': new_task.id,
+                        'type': 'task'
+                    },
+                    room=emp_id
+                )
 
                 assigned_users.append({
                     "emp_id": user.empId,
@@ -3258,7 +3346,7 @@ def get_holiday():
                     "status": "error",
                     "message": "Unauthorized"
                 }), 401
-            superadmin = SuperAdmin.query.filter_by(id=user.superadminId).first()
+            superadmin = SuperAdmin.query.filter_by(superId=user.superadminId).first()
 
         if not superadmin or not superadmin.superadminPanel:
             return jsonify({
@@ -3444,6 +3532,18 @@ def update_asset_status(asset_id):
 
         db.session.commit()
 
+        if hasattr(asset, 'empId') and asset.empId:
+            socketio.emit(
+                'notification',
+                {
+                    'title': '🛠️ Asset Updated',
+                    'message': f'Your asset request has been updated. Status: {asset.status}',
+                    'type': 'asset',
+                    'assetId': asset.id
+                },
+                room=asset.empId
+            )
+
         return jsonify({
             "status": "success",
             "message": "Asset updated successfully"
@@ -3598,6 +3698,7 @@ def get_departments_with_users():
 #      SALARY SECTION           
 # ====================================
 
+
 @superAdminBP.route('/salary', methods=['GET'])
 def get_all_user_admin_data():
     try:
@@ -3660,13 +3761,13 @@ def get_all_user_admin_data():
                 "name": user.userName,
                 "email": user.email,
                 "role": user.userRole,
-                "punch_count": punch_count,
+                "basic_salary": user.currentSalary,
+                "present": punch_count,
                 "leave_summary": {
-                    "total_leaves": leave_count,
+                    "absent": leave_count,
                     "paid_days": paid_days,
                     "unpaid_days": unpaid_days
                 },
-                "basic_salary": basic_salary,
                 "jobInfo": job_info
             })
 
@@ -3708,6 +3809,36 @@ def get_all_user_admin_data():
             "monthly_leave_limit": l.monthly_leave_limit
         } for l in admin_panel.adminLeave]
 
+        shift = ShiftTimeManagement.query.filter_by(
+            superpanel = admin_panel.id,
+            shiftStatus=True
+        ).first()
+
+        total_working_days = 0
+        working_days_list = shift.workingDays if shift and shift.workingDays else []
+        saturday_condition = shift.saturdayCondition if shift and shift.saturdayCondition else None
+
+        if working_days_list:
+            working_days_set = set(day.lower() for day in working_days_list)
+
+            month_range = calendar.monthrange(today.year, today.month)[1]
+            for day in range(1, month_range + 1):
+                date = datetime(today.year, today.month, day).date()
+                weekday = date.strftime("%A").lower()
+
+                if weekday == 'saturday':
+                    if saturday_condition:
+                        week_no = (day - 1) // 7 + 1
+                        if(
+                            (saturday_condition == 'All Saturdays Working') or
+                            (saturday_condition == 'First & Third Saturdays Working' and week_no in [1, 3]) or
+                            (saturday_condition == 'Second & Fourth Saturdays Working' and week_no in [2, 4]) or
+                            (saturday_condition == 'Only First Saturday Working' and week_no == 1)
+                        ):
+                            total_working_days += 1
+                elif weekday in working_days_set:
+                    total_working_days += 1
+
         return jsonify({
             "status": "success",
             "data": {
@@ -3716,6 +3847,11 @@ def get_all_user_admin_data():
                     "bonus_policy": bonus_policy,
                     "payroll_policy": payroll_policy,
                     "leave_policy": leave_policy
+                },
+                "shift_policy" : {
+                    "workingDays": working_days_list,
+                    "saturdayCondition": saturday_condition,
+                    "totalWorkingDaysThisMonth": total_working_days
                 }
             }
         }), 200
@@ -3725,5 +3861,260 @@ def get_all_user_admin_data():
         return jsonify({
             "status": "error",
             "message": "Failed to fetch user-admin data",
+            "error": str(e)
+        }), 500
+
+
+@superAdminBP.route('/salary', methods=['POST'])
+def post_user_salary():
+    data = request.form
+
+    required_fields = [
+        'empId', 'present', 'absent', 'basicSalary',
+        'deductions', 'finalPay', 'mode', 'status', 'approvedLeaves'
+    ]
+
+    if not all(field in data for field in required_fields):
+        return jsonify({'status': 'error', 'message': 'Missing required salary fields'}), 400
+
+    try:
+        superadmin, err, status = get_authorized_superadmin(required_section="salary", required_permissions="edit")
+        if err:
+            return err, status
+
+        emp_id = data.get('empId')
+        user = User.query.filter_by(empId=emp_id, superadminId=superadmin.superId).first()
+        if not user:
+            return jsonify({'status': 'error', 'message': 'User with this empId not found'}), 404
+
+        panel_data = user.panelData
+        if not panel_data:
+            return jsonify({'status': 'error', 'message': 'UserPanelData not found'}), 404
+
+        onhold = data.get('onhold', 'false').lower() == 'true'
+        onhold_reason = data.get('onhold_reason') or None
+        bonusamount = data.get('bonus') or None
+        bonusreason = data.get('bonus_reason') or None
+        payslip = data.get('payslip') or None
+
+        salary_entry = UserSalaryDetails(
+            panelDataID=panel_data.id,
+            empId=emp_id,
+            present=data.get('present'),
+            absent=data.get('absent'),
+            basicSalary=data.get('basicSalary'),
+            deductions=data.get('deductions'),
+            finalPay=data.get('finalPay'),
+            mode=data.get('mode'),
+            status=data.get('status'),
+            payslip=payslip,
+            approvedLeaves=data.get('approvedLeaves'),
+            onhold=onhold,
+            onhold_reason=onhold_reason,
+            bonus=bonusamount,
+            bonus_reason=bonusreason
+        )
+
+        db.session.add(salary_entry)
+        db.session.commit()
+
+        return jsonify({'status': 'success', 'message': 'Salary data saved successfully'}), 201
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            'status': 'error',
+            'message': 'Internal Server Error',
+            'error': str(e)
+        }), 500
+
+
+@superAdminBP.route('/salaryrecords', methods=['GET'])
+def get_user_salaries():
+    try:
+        superadmin, err, status = get_authorized_superadmin(required_section="salary", required_permissions="view")
+        if err:
+            return err, status
+
+        emp_id = request.args.get('empId')
+        month = request.args.get('month')  # 1-12
+        year = request.args.get('year')    # YYYY
+        page = int(request.args.get('page', 1))
+        limit = int(request.args.get('limit', 10))
+        start = (page - 1) * limit
+
+        query = UserSalaryDetails.query.join(UserPanelData).join(User).filter(
+            User.superadminId == superadmin.superId
+        )
+
+        if emp_id:
+            query = query.filter(UserSalaryDetails.empId == emp_id)
+
+        if month and year:
+            try:
+                month = int(month)
+                year = int(year)
+                month_start = datetime(year, month, 1)
+                if month == 12:
+                    month_end = datetime(year + 1, 1, 1)
+                else:
+                    month_end = datetime(year, month + 1, 1)
+
+                query = query.filter(
+                    UserSalaryDetails.createdAt >= month_start,
+                    UserSalaryDetails.createdAt < month_end
+                )
+            except ValueError:
+                return jsonify({'status': 'error', 'message': 'Invalid month or year format'}), 400
+
+        total_records = query.count()
+        salary_data = query.order_by(UserSalaryDetails.createdAt.desc()).offset(start).limit(limit).all()
+
+        results = []
+        for salary in salary_data:
+            results.append({
+                "empId": salary.empId,
+                "present": salary.present,
+                "absent": salary.absent,
+                "approvedLeaves": salary.approvedLeaves,
+                "basicSalary": salary.basicSalary,
+                "deductions": salary.deductions,
+                "finalPay": salary.finalPay,
+                "mode": salary.mode,
+                "status": salary.status,
+                "payslip": salary.payslip,
+                "onhold": salary.onhold,
+                "onhold_reason": salary.onhold_reason,
+                "createdAt": salary.createdAt.strftime("%Y-%m-%d")
+            })
+
+        return jsonify({
+            "status": "success",
+            "data": {
+                "salaries": results,
+                "pagination": {
+                    "page": page,
+                    "limit": limit,
+                    "total": total_records,
+                    "pages": (total_records + limit - 1) // limit
+                }
+            }
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Failed to fetch salary records",
+            "error": str(e)
+        }), 500
+
+
+# ====================================
+#      PROMOTION SECTION           
+# ====================================
+
+@superAdminBP.route('/promotion/<int:user_id>', methods=['POST'])
+def promote_user(user_id):
+    try:
+        superadmin, err, status = get_authorized_superadmin(required_section="employee", required_permissions="edit")
+        if err:
+            return err, status
+
+        data = request.get_json()
+        if not data or 'new_designation' not in data:
+            return jsonify({
+                "status": "error",
+                "message": "Missing 'new_designation' in request body"
+            }), 400
+
+        user = User.query.filter_by(id=user_id, superadminId=superadmin.superId).first()
+        if not user:
+            return jsonify({"status": "error", "message": "User not found"}), 404
+
+        panel = user.panelData
+        if not panel:
+            return jsonify({"status": "error", "message": "User panel data not found"}), 404
+
+        job_info = user.department
+
+        previous_department = job_info.department
+        new_department = data.get("new_department", previous_department)
+        new_designation = data["new_designation"]
+        description = data.get("description")
+
+        promotion = UserPromotion(
+            id=int(datetime.utcnow().timestamp()),
+            empId=user.empId,
+            new_designation=new_designation,
+            previous_department=previous_department,
+            new_department=new_department,
+            description=description,
+            userpanel=panel.id
+        )
+
+        db.session.add(promotion)
+        db.session.commit()
+
+        socketio.emit(
+            'notification',
+            {
+                'title': '🎉 Promotion Update',
+                'message': f"You have been promoted to {new_designation}",
+                'type': 'promotion',
+                'empId': user.empId
+            },
+            room=user.empId
+        )
+
+        return jsonify({
+            "status": "success",
+            "message": f"User {user.empId} promoted to {new_designation}",
+            "promotion_id": promotion.id
+        }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e)
+        }), 500
+
+
+@superAdminBP.route('/promotion/<int:promotion_id>', methods=['DELETE'])
+def delete_promotion(promotion_id):
+    try:
+        superadmin, err, status = get_authorized_superadmin(required_section="employee", required_permissions="edit")
+        if err:
+            return err, status
+
+        promotion = UserPromotion.query.get(promotion_id)
+        if not promotion:
+            return jsonify({
+                "status": "error",
+                "message": "Promotion record not found"
+            }), 404
+
+        user = User.query.filter_by(empId=promotion.empId, superadminId=superadmin.superId).first()
+        if not user:
+            return jsonify({
+                "status": "error",
+                "message": "Unauthorized to delete this promotion"
+            }), 403
+
+        db.session.delete(promotion)
+        db.session.commit()
+
+        return jsonify({
+            "status": "success",
+            "message": f"Promotion record {promotion_id} deleted successfully"
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
             "error": str(e)
         }), 500

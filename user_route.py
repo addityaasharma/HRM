@@ -1,4 +1,4 @@
-from models import User,UserPanelData,db,SuperAdmin,PunchData, UserTicket, UserDocument, UserChat, UserLeave, ShiftTimeManagement, Announcement, Likes, Comments, Notice, ProductAsset, TaskUser ,TaskComments, TaskManagement, TicketAssignmentLog
+from models import User,UserPanelData,db,SuperAdmin,PunchData, UserTicket, UserDocument, UserChat, UserLeave, ShiftTimeManagement, Announcement, Likes, Comments, Notice, ProductAsset, TaskUser ,TaskComments, TaskManagement, TicketAssignmentLog, UserSalary, UserPromotion
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask import Blueprint, request, json, jsonify, g
 from datetime import datetime,time, timedelta
@@ -678,6 +678,20 @@ def raise_ticket():
         db.session.add(ticket)
         db.session.commit()
 
+        superadmin = user.superadmin
+        if superadmin:
+            socketio.emit(
+                'ticket_notification',
+                {
+                    'message': f'New ticket raised by {user.userName}',
+                    'empId': user.empId,
+                    'topic': ticket.topic,
+                    'priority': ticket.priority,
+                    'ticketId': ticket.id
+                },
+                room=superadmin.companyEmail
+            )
+
         return jsonify({
             'status': 'success',
             'message': 'Ticket raised successfully',
@@ -877,33 +891,68 @@ def editTicket(ticket_id):
                 'message': 'You are not authorized to update this ticket'
             }), 403
 
-        # Update ticket fields if present
+        notify_status_change = False
+        notify_assignment_change = False
+        new_assignee_empId = None
+
         if 'status' in data:
-            ticket.status = data['status']
+            if ticket.status != data['status']:
+                ticket.status = data['status']
+                notify_status_change = True
+
         if 'problem' in data:
             ticket.problem = data['problem']
 
-        # Assignment change
         if 'assign_to_empId' in data:
             new_assignee_empId = data['assign_to_empId']
-
             if ticket.assigned_to_empId != new_assignee_empId:
                 new_user = User.query.filter_by(empId=new_assignee_empId).first()
                 if not new_user:
                     return jsonify({'status': 'error', 'message': 'Target user with empId not found'}), 404
 
-                # Log the assignment
                 log = TicketAssignmentLog(
                     ticket_id=ticket.id,
                     assigned_by_empId=user.empId,
                     assigned_to_empId=new_assignee_empId
                 )
                 db.session.add(log)
-
-                # Update assignment
                 ticket.assigned_to_empId = new_assignee_empId
+                notify_assignment_change = True
 
         db.session.commit()
+
+        admin = user.superadmin
+        user_ticket_owner = User.query.filter_by(empId=ticket.userId).first()
+
+        if notify_status_change:
+            if admin:
+                socketio.emit('ticket_notification', {
+                    'message': f"Ticket #{ticket.id} status changed to {ticket.status}",
+                    'ticket_id': ticket.id,
+                    'new_status': ticket.status,
+                }, room=admin.companyEmail)
+
+            # Notify ticket owner
+            if user_ticket_owner:
+                socketio.emit('ticket_notification', {
+                    'message': f"Your ticket #{ticket.id} status changed to {ticket.status}",
+                    'ticket_id': ticket.id,
+                    'new_status': ticket.status,
+                }, room=user_ticket_owner.empId)
+
+        if notify_assignment_change:
+            if admin:
+                socketio.emit('ticket_notification', {
+                    'message': f"Ticket #{ticket.id} reassigned to {new_assignee_empId}",
+                    'ticket_id': ticket.id,
+                    'assigned_to': new_assignee_empId,
+                }, room=admin.companyEmail)
+
+            socketio.emit('ticket_notification', {
+                'message': f"You have been assigned to ticket #{ticket.id}",
+                'ticket_id': ticket.id,
+                'assigned_by': user.empId
+            }, room=new_assignee_empId)
 
         return jsonify({
             'status': 'success',
@@ -920,6 +969,7 @@ def editTicket(ticket_id):
             'message': "Internal Server Error",
             'error': str(e)
         }), 500
+
 
 # ====================================
 #        USER DOCUMENTS SECTION
@@ -1105,7 +1155,7 @@ def delete_document(document_id):
 #          USER SALARY SECTION
 # ====================================
 
-@user.route('/salary', methods=['GET'])
+@user.route('/salaryrecords', methods=['GET'])
 def salary_details():
     try:
         userID = g.user.get('userID') if g.user else None
@@ -1116,7 +1166,7 @@ def salary_details():
         if not user:
             return jsonify({"status" : "error", "message" : "No user found"}), 409
         
-        salaryDetails = user.panelData.userSalaryDetails
+        salaryDetails = user.panelData.UserSalary
         if not salaryDetails:
             return jsonify({"status" : "error", "message" : "No salary details"}), 409
         
@@ -1134,6 +1184,8 @@ def salary_details():
                 "status" : salary.status,
                 "payslip" : salary.payslip,
                 "approvedLeaves" : salary.approvedLeaves,
+                "onHold" : salary.onhold,
+                "approvedLeaves" : salary.onhold_reason,
             })
 
         return jsonify({"status" : "success", "message" : "fetched Successfully", "data" : salarylist}), 200
@@ -1141,6 +1193,130 @@ def salary_details():
     except Exception as e:
         db.session.rollback()
         return jsonify({"status" : "error", "message" : "Internal Server Error", "error" : str(e)}), 500
+
+
+@user.route('/salary', methods=['POST'])
+def post_user_salary():
+    try:
+        user_id = g.user.get('userID') if g.user else None
+        if not user_id:
+            return jsonify({'status': 'error', 'message': 'Unauthorized'}), 401
+
+        user = User.query.filter_by(id=user_id).first()
+        if not user or not user.panelData:
+            return jsonify({'status': 'error', 'message': 'User or panel data not found'}), 404
+
+        data = request.get_json()
+        required_fields = ['payType', 'ctc', 'baseSalary', 'currency', 'paymentMode', 'bankName', 'accountNumber', 'IFSC']
+        if not all(field in data for field in required_fields):
+            return jsonify({'status': 'error', 'message': 'All fields are required'}), 400
+
+        existing = UserSalary.query.filter_by(panelData=user.panelData.id).first()
+        if existing:
+            return jsonify({'status': 'error', 'message': 'Salary details already submitted'}), 409
+
+        salary = UserSalary(
+            panelData=user.panelData.id,
+            payType=data['payType'],
+            ctc=int(data['ctc']),
+            baseSalary=int(data['baseSalary']),
+            currency=data['currency'],
+            paymentMode=data['paymentMode'],
+            bankName=data['bankName'],
+            accountNumber=data['accountNumber'],
+            IFSC=data['IFSC']
+        )
+        db.session.add(salary)
+        db.session.commit()
+
+        return jsonify({
+            'status': 'success',
+            'message': 'Salary details submitted successfully',
+            'data': {
+                'payType': salary.payType,
+                'ctc': salary.ctc,
+                'baseSalary': salary.baseSalary,
+                'currency': salary.currency,
+                'paymentMode': salary.paymentMode,
+                'bankName': salary.bankName,
+                'accountNumber': salary.accountNumber,
+                'IFSC': salary.IFSC
+            }
+        }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'status': 'error', 'message': 'Internal server error', 'error': str(e)}), 500
+
+
+@user.route('/salary', methods=['GET'])
+def get_user_salary():
+    try:
+        user_id = g.user.get('userID') if g.user else None
+        if not user_id:
+            return jsonify({'status': 'error', 'message': 'Unauthorized'}), 401
+
+        user = User.query.filter_by(id=user_id).first()
+        if not user or not user.panelData:
+            return jsonify({'status': 'error', 'message': 'User or panel data not found'}), 404
+
+        salary = UserSalary.query.filter_by(panelData=user.panelData.id).first()
+        if not salary:
+            return jsonify({'status': 'error', 'message': 'Salary details not found'}), 404
+
+        return jsonify({
+            'status': 'success',
+            'data': {
+                'payType': salary.payType,
+                'ctc': salary.ctc,
+                'baseSalary': salary.baseSalary,
+                'currency': salary.currency,
+                'paymentMode': salary.paymentMode,
+                'bankName': salary.bankName,
+                'accountNumber': salary.accountNumber,
+                'IFSC': salary.IFSC
+            }
+        }), 200
+
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': 'Internal server error', 'error': str(e)}), 500
+
+
+@user.route('/salary/<int:id>', methods=['PUT'])
+def edit_user_salary(id):
+    try:
+        user_id = g.user.get('userID') if g.user else None
+        if not user_id:
+            return jsonify({'status': 'error', 'message': 'Unauthorized'}), 401
+
+        user = User.query.filter_by(id=user_id).first()
+        if not user or not user.panelData:
+            return jsonify({'status': 'error', 'message': 'User or panel data not found'}), 404
+
+        salary = UserSalary.query.filter_by(panelData=user.panelData.id, id=id).first()
+        if not salary:
+            return jsonify({'status': 'error', 'message': 'Salary record not found'}), 404
+
+        data = request.get_json()
+        if not data:
+            return jsonify({'status': 'error', 'message': 'No data provided'}), 400
+
+        editable_fields = ['payType', 'ctc', 'baseSalary', 'currency', 'paymentMode', 'bankName', 'accountNumber', 'IFSC']
+
+        for field in editable_fields:
+            if field in data:
+                setattr(salary, field, data[field])
+
+        db.session.commit()
+
+        return jsonify({
+            'status': 'success',
+            'message': 'Salary details updated successfully'
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'status': 'error', 'message': 'Internal server error', 'error': str(e)}), 500
 
 
 # ====================================
@@ -1527,6 +1703,19 @@ def request_leave():
 
         db.session.add(newLeave)
         db.session.commit()
+
+        socketio.emit(
+            'leave_request',
+            {
+                "title": "New Leave Request",
+                "message": f"{user.userName} has requested leave from {leaveStart} to {leaveEnd}",
+                "empId": user.empId,
+                "days": totalDays,
+                "unpaidDays": unpaidDays,
+                "leaveType": leavetype
+            },
+            room=superadmin.companyEmail
+        )
 
         return jsonify({"status": "success", "message": "Leave request submitted"}), 200
 
@@ -1966,7 +2155,6 @@ def request_assets():
                 "message": "User not found",
             }), 404
 
-        # Check if user has panelData
         if not hasattr(user, 'panelData') or not user.panelData:
             return jsonify({
                 "status": "error",
@@ -1996,7 +2184,6 @@ def request_assets():
         location = data.get('location')
         qty = data.get('qty', 1)
 
-        # Validate qty is a positive number
         try:
             qty = int(qty)
             if qty <= 0:
@@ -2010,7 +2197,6 @@ def request_assets():
                 "message": "Quantity must be a valid number"
             }), 400
 
-        # Handle purchaseDate
         purchaseDate = None
         if data.get('purchaseDate'):
             try:
@@ -2021,7 +2207,6 @@ def request_assets():
                     "message": "Invalid purchaseDate format. Use YYYY-MM-DD"
                 }), 400
 
-        # Handle warrantyTill
         warrantyTill = None
         if data.get('warrantyTill'):
             try:
@@ -2038,14 +2223,12 @@ def request_assets():
                     "message": "Invalid warrantyTill format. Use YYYY-MM-DD"
                 }), 400
 
-        # Validate purchase date is not in the future
         if purchaseDate and purchaseDate > datetime.now():
             return jsonify({
                 "status": "error",
                 "message": "Purchase date cannot be in the future"
             }), 400
 
-        # Create the asset
         asset = ProductAsset(
             superpanel=user.panelData.id,
             productId=productId,
@@ -2066,7 +2249,6 @@ def request_assets():
         db.session.add(asset)
         db.session.commit()
 
-        # Add the asset to user's MyAssets if it exists
         try:
             if hasattr(user.panelData, 'MyAssets'):
                 if user.panelData.MyAssets is None:
@@ -2093,7 +2275,7 @@ def request_assets():
         return jsonify({
             "status": "error",
             "message": "Internal Server Error",
-            "error": str(e) if app.debug else "Something went wrong"  # Hide error details in production
+            "error": str(e)
         }), 500
 
 
@@ -2386,6 +2568,121 @@ def update_task_status_and_comment(task_id):
             "message": "Task updated successfully",
             "task_status": task.status,
             "user_completed": task_user.is_completed
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e)
+        }), 500
+
+
+# ====================================
+#        USER PROJECT SECTION
+# ====================================
+
+@user.route('/promotion', methods=['GET'])
+def get_promotion():
+    try:
+        userID = g.user.get('userID') if g.user else None
+        if not userID:
+            return jsonify({
+                "status": "error",
+                "message": "Unauthorized"
+            }), 401
+
+        user = User.query.filter_by(id=userID).first()
+        if not user:
+            return jsonify({
+                "status": "error",
+                "message": "User not found"
+            }), 404
+
+        if not user.panelData:
+            return jsonify({
+                "status": "error",
+                "message": "User panel data not found"
+            }), 404
+
+        promotions = UserPromotion.query.filter_by(userpanel=user.panelData.id).order_by(
+            UserPromotion.dateofpromotion.desc()
+        ).all()
+
+        promotion_data = []
+        for promo in promotions:
+            promotion_data.append({
+                "promotion_id": promo.id,
+                "empId": promo.empId,
+                "new_designation": promo.new_designation,
+                "previous_department": promo.previous_department,
+                "new_department": promo.new_department,
+                "description": promo.description,
+                "dateofpromotion": promo.dateofpromotion.isoformat()
+            })
+
+        return jsonify({
+            "status": "success",
+            "promotions": promotion_data
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e)
+        }), 500
+
+
+@user.route('/promotion/<int:promotion_id>', methods=['PUT'])
+def update_promotion_description(promotion_id):
+    try:
+        userID = g.user.get('userID') if g.user else None
+        if not userID:
+            return jsonify({
+                "status": "error",
+                "message": "Unauthorized"
+            }), 401
+
+        user = User.query.filter_by(id=userID).first()
+        if not user:
+            return jsonify({
+                "status": "error",
+                "message": "User not found"
+            }), 404
+
+        if not user.panelData:
+            return jsonify({
+                "status": "error",
+                "message": "User panel data not found"
+            }), 404
+
+        promotion = UserPromotion.query.filter_by(
+            id=promotion_id,
+            userpanel=user.panelData.id
+        ).first()
+
+        if not promotion:
+            return jsonify({
+                "status": "error",
+                "message": "Promotion record not found"
+            }), 404
+
+        data = request.get_json()
+        if not data or 'description' not in data:
+            return jsonify({
+                "status": "error",
+                "message": "Description field is required"
+            }), 400
+
+        promotion.description = data['description']
+        db.session.commit()
+
+        return jsonify({
+            "status": "success",
+            "message": "Promotion description updated",
+            "promotion_id": promotion.id
         }), 200
 
     except Exception as e:

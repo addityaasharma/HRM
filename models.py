@@ -199,6 +199,8 @@ class ShiftTimeManagement(db.Model):
     OverTimeCountAfter = db.Column(db.DateTime, nullable=False)
     Biometric = db.Column(db.Boolean, default=False)
     RemoteCheckIn = db.Column(db.Boolean, default=False)
+    workingDays = db.Column(db.JSON, nullable=True)
+    saturdayCondition = db.Column(db.String(120),nullable=True)
     # AutoLogout = db.Column(db.Boolean, default=True)
     ShiftSwap = db.Column(db.Boolean, default=False)
 
@@ -264,6 +266,7 @@ class PayrollPolicy(db.Model):
 # ====================================
 #           USER SECTION              
 # ====================================
+
 
 class User(db.Model):
     __tablename__ = 'user'
@@ -358,6 +361,7 @@ class UserPanelData(db.Model):
     UserMessage = db.relationship('UserChat', backref='user_panel', lazy=True)
     MyTasks = db.relationship('TaskUser', backref='user_panel', lazy=True)
     MyAssets = db.relationship('ProductAsset', backref='user_panel', lazy=True)
+    UserPromotion = db.relationship('UserPromotion', backref='user_panel', lazy=True)
 
 
 class ProductAsset(db.Model):
@@ -436,11 +440,16 @@ class UserSalaryDetails(db.Model):
     absent = db.Column(db.String(12))
     basicSalary = db.Column(db.String(12))
     deductions = db.Column(db.String(12))
+    bonus = db.Column(db.Integer)
+    bonus_reason = db.Column(db.Integer)
     finalPay = db.Column(db.String(12))
     mode = db.Column(db.String(12))
     status  = db.Column(db.String(12))
-    payslip = db.Column(db.String(12))
+    payslip = db.Column(db.String(255))
     approvedLeaves = db.Column(db.String(12))
+    onhold = db.Column(db.Boolean,default=False)
+    onhold_reason = db.Column(db.String(255))
+    createdAt = db.Column(db.DateTime, default=datetime.utcnow)
 
 
 class UserLeave(db.Model):                                           #user leave
@@ -589,3 +598,14 @@ class UserHoliday(db.Model):
     type = db.Column(db.String(200))
     description = db.Column(db.String(200))
 
+
+class UserPromotion(db.Model):
+    __tablename__ = 'userpromotion'
+    id = db.Column(db.Integer, primary_key=True, autoincrement=False)
+    empId = db.Column(db.String(120), nullable=False)
+    new_designation = db.Column(db.String(120), nullable=False)
+    previous_department = db.Column(db.String(120),nullable=False)
+    new_department = db.Column(db.String(120), nullable=False)
+    description = db.Column(db.String(255))
+    dateofpromotion  = db.Column(db.DateTime, default=datetime.utcnow)
+    userpanel = db.Column(db.Integer, db.ForeignKey('userpaneldata.id'), nullable=False)

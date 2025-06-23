@@ -288,3 +288,144 @@ def update_project(task_id):
             "message": "Internal Server Error",
             "error": str(e)
         }), 500
+
+
+@superAdminBP.route('/salary', methods=['GET'])
+def get_all_user_admin_data():
+    try:
+        superadmin, err, status = get_authorized_superadmin(required_section="dashboard", required_permissions="view")
+        if err:
+            return err, status
+
+        # Get month and year from query params (fallback to current)
+        query_month = request.args.get('month', type=int)
+        query_year = request.args.get('year', type=int)
+
+        today = datetime.utcnow().date()
+        month = query_month if query_month else today.month
+        year = query_year if query_year else today.year
+
+        month_start = datetime(year, month, 1).date()
+        if month == 12:
+            month_end = datetime(year, 12, 31).date()
+        else:
+            month_end = (datetime(year, month + 1, 1) - timedelta(days=1)).date()
+
+        users = User.query.filter_by(superadminId=superadmin.superId).all()
+        user_data_list = []
+
+        for user in users:
+            panel_data = user.panelData
+
+            # --- Punch Count ---
+            punch_count = 0
+            if panel_data:
+                punch_count = db.session.query(PunchData).filter(
+                    PunchData.panelData == panel_data.id,
+                    PunchData.login >= month_start,
+                    PunchData.login <= month_end
+                ).count()
+
+            # --- Leave Summary ---
+            paid_days = 0
+            unpaid_days = 0
+            leave_count = 0
+            if panel_data:
+                leaves = db.session.query(UserLeave).filter(
+                    UserLeave.panelData == panel_data.id,
+                    UserLeave.status == 'approved',
+                    UserLeave.leavefrom >= month_start,
+                    UserLeave.leavefrom <= month_end
+                ).all()
+
+                leave_count = len(leaves)
+                for leave in leaves:
+                    unpaid = leave.unpaidDays or 0
+                    unpaid_days += unpaid
+                    paid_days += max((leave.days or 0) - unpaid, 0)
+
+            # --- Job Info ---
+            job_info = {
+                "department": panel_data.userJobInfo[0].department if panel_data and panel_data.userJobInfo else None,
+                "designation": panel_data.userJobInfo[0].designation if panel_data and panel_data.userJobInfo else None,
+                "joiningDate": panel_data.userJobInfo[0].joiningDate.isoformat() if panel_data and panel_data.userJobInfo and panel_data.userJobInfo[0].joiningDate else None
+            }
+
+            # --- Basic Salary ---
+            basic_salary = panel_data.userSalaryDetails[0].basic_salary if panel_data and panel_data.userSalaryDetails else None
+
+            user_data_list.append({
+                "empId": user.empId,
+                "name": user.userName,
+                "email": user.email,
+                "role": user.userRole,
+                "punch_count": punch_count,
+                "leave_summary": {
+                    "total_leaves": leave_count,
+                    "paid_days": paid_days,
+                    "unpaid_days": unpaid_days
+                },
+                "basic_salary": basic_salary,
+                "jobInfo": job_info
+            })
+
+        # --- Admin-Side Info ---
+        admin_panel = superadmin.superadminPanel
+
+        # Bonus Policy Fix
+        bonus_policy = [{
+            "bonus_name": b.bonus_name,
+            "bonus_method": b.bonus_method,
+            "amount": b.amount,
+            "apply": b.apply,
+            "employeement_type": b.employeement_type,
+            "department_type": b.department_type
+        } for b in admin_panel.adminBonusPolicy]
+
+        # Payroll Policy Fix
+        payroll_policy = [{
+            "policyname": p.policyname,
+            "calculation_method": p.calculation_method,
+            "overtimePolicy": p.overtimePolicy,
+            "perhour": p.perhour,
+            "pfDeduction": p.pfDeduction,
+            "salaryHoldCondition": p.salaryHoldCondition,
+            "disbursement": p.disbursement.isoformat() if p.disbursement else None,
+            "employeementType": p.employeementType,
+            "departmentType": p.departmentType
+        } for p in admin_panel.adminPayrollPolicy]
+
+        # Leave Policy Fix
+        leave_policy = [{
+            "leaveName": l.leaveName,
+            "leaveType": l.leaveType,
+            "probation": l.probation,
+            "lapse_policy": l.lapse_policy,
+            "calculationType": l.calculationType,
+            "day_type": l.day_type,
+            "encashment": l.encashment,
+            "carryforward": l.carryforward,
+            "max_leave_once": l.max_leave_once,
+            "max_leave_year": l.max_leave_year,
+            "monthly_leave_limit": l.monthly_leave_limit
+        } for l in admin_panel.adminLeave]
+
+        return jsonify({
+            "status": "success",
+            "data": {
+                "users": user_data_list,
+                "admin": {
+                    "bonus_policy": bonus_policy,
+                    "payroll_policy": payroll_policy,
+                    "leave_policy": leave_policy
+                }
+            }
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Failed to fetch user-admin data",
+            "error": str(e)
+        }), 500
