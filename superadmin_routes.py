@@ -2277,7 +2277,9 @@ def get_shift_policy():
                 "OverTimeCountAfter": shift.OverTimeCountAfter.strftime('%Y-%m-%d %I:%M:%S %p') if shift.OverTimeCountAfter else None,
                 "Biometric": shift.Biometric,
                 "RemoteCheckIn": shift.RemoteCheckIn,
-                "ShiftSwap": shift.ShiftSwap
+                "ShiftSwap": shift.ShiftSwap,
+                "workingDays": shift.workingDays if shift.workingDays else [],
+                "saturdayCondition": shift.saturdayCondition
             })
 
         return jsonify({
@@ -2340,7 +2342,11 @@ def edit_shift_policy(shift_id):
                 "message": "No data provided"
             }), 400
 
-        shift = ShiftTimeManagement.query.filter_by(id=shift_id, superpanel=superadmin.superadminPanel.id).first()
+        shift = ShiftTimeManagement.query.filter_by(
+            id=shift_id,
+            superpanel=superadmin.superadminPanel.id
+        ).first()
+
         if not shift:
             return jsonify({
                 "status": "error",
@@ -2350,7 +2356,8 @@ def edit_shift_policy(shift_id):
         updatable_fields = [
             'shiftName', 'shiftType', 'shiftStatus', 'shiftStart', 'shiftEnd',
             'GraceTime', 'MaxEarly', 'MaxLateEntry', 'HalfDayThreshhold',
-            'OverTimeCountAfter', 'Biometric', 'RemoteCheckIn', 'ShiftSwap'
+            'OverTimeCountAfter', 'Biometric', 'RemoteCheckIn', 'ShiftSwap',
+            'workingDays', 'saturdayCondition'
         ]
 
         time_format = '%Y-%m-%d %I:%M:%S %p'
@@ -2358,7 +2365,11 @@ def edit_shift_policy(shift_id):
         for field in updatable_fields:
             if field in data:
                 value = data[field]
-                if field in ['shiftStart', 'shiftEnd', 'GraceTime', 'MaxEarly', 'MaxLateEntry', 'HalfDayThreshhold', 'OverTimeCountAfter']:
+
+                if field in [
+                    'shiftStart', 'shiftEnd', 'GraceTime', 'MaxEarly',
+                    'MaxLateEntry', 'HalfDayThreshhold', 'OverTimeCountAfter'
+                ]:
                     try:
                         value = datetime.strptime(value, time_format)
                     except Exception:
@@ -2366,6 +2377,22 @@ def edit_shift_policy(shift_id):
                             "status": "error",
                             "message": f"Invalid datetime format for {field}, expected format: {time_format}"
                         }), 400
+
+                if field == 'workingDays':
+                    if not isinstance(value, list):
+                        return jsonify({
+                            "status": "error",
+                            "message": "workingDays must be a list of weekdays"
+                        }), 400
+
+                if field == 'saturdayCondition':
+                    allowed_conditions = ['every', 'alternate', 'first_last', 'none']
+                    if value.lower() not in allowed_conditions:
+                        return jsonify({
+                            "status": "error",
+                            "message": f"saturdayCondition must be one of {allowed_conditions}"
+                        }), 400
+
                 setattr(shift, field, value)
 
         db.session.commit()
@@ -2382,6 +2409,7 @@ def edit_shift_policy(shift_id):
             "message": "Internal Server Error",
             "error": str(e)
         }), 500
+
 
 
 # ====================================

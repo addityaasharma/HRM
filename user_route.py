@@ -1,4 +1,4 @@
-from models import User,UserPanelData,db,SuperAdmin,PunchData, UserTicket, UserDocument, UserChat, UserLeave, ShiftTimeManagement, Announcement, Likes, Comments, Notice, ProductAsset, TaskUser ,TaskComments, TaskManagement, TicketAssignmentLog, UserSalary, UserPromotion
+from models import User,UserPanelData,db,SuperAdmin,PunchData, UserTicket, UserDocument, UserChat, UserLeave, ShiftTimeManagement, Announcement, Likes, Comments, Notice, ProductAsset, TaskUser ,TaskComments, TaskManagement, TicketAssignmentLog, UserSalary, UserPromotion, JobInfo
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask import Blueprint, request, json, jsonify, g
 from datetime import datetime,time, timedelta
@@ -2580,7 +2580,7 @@ def update_task_status_and_comment(task_id):
 
 
 # ====================================
-#        USER PROJECT SECTION
+#        USER PROMOTION SECTION
 # ====================================
 
 @user.route('/promotion', methods=['GET'])
@@ -2692,3 +2692,154 @@ def update_promotion_description(promotion_id):
             "message": "Internal Server Error",
             "error": str(e)
         }), 500
+
+
+# ====================================
+#        USER JOB SECTION
+# ====================================
+
+@user.route('/jobinfo', methods=['POST'])
+def add_job_info():
+    try:
+        userID = g.user.get('userID') if g.user else None
+        if not userID:
+            return jsonify({"status": "error", "message": "Unauthorized"}), 401
+
+        user = User.query.get(userID)
+        if not user or not user.panelData:
+            return jsonify({"status": "error", "message": "User or panel data not found"}), 404
+
+        existing_info = JobInfo.query.filter_by(panelData=user.panelData.id).first()
+        if existing_info:
+            return jsonify({"status": "error", "message": "Job info already exists"}), 400
+
+        data = request.get_json()
+        job_info = JobInfo(
+            panelData=user.panelData.id,
+            position=data.get('position'),
+            jobLevel=data.get('jobLevel'),
+            department=data.get('department'),
+            location=data.get('location'),
+            reporting_manager=data.get('reporting_manager'),
+            join_date=datetime.strptime(data['join_date'], '%Y-%m-%d') if data.get('join_date') else None,
+            total_time=data.get('total_time'),
+            employement_type=data.get('employement_type'),
+            probation_period=data.get('probation_period'),
+            notice_period=data.get('notice_period'),
+            contract_number=data.get('contract_number'),
+            contract_type=data.get('contract_type'),
+            start_date=datetime.strptime(data['start_date'], '%Y-%m-%d') if data.get('start_date') else None,
+            end_date=datetime.strptime(data['end_date'], '%Y-%m-%d') if data.get('end_date') else None,
+            working_type=data.get('working_type'),
+            shift_time=datetime.strptime(data['shift_time'], '%Y-%m-%d %H:%M:%S') if data.get('shift_time') else None,
+            previous_position=data.get('previous_position'),
+            position_date=datetime.strptime(data['position_date'], '%Y-%m-%d') if data.get('position_date') else None,
+            transfer_location=data.get('transfer_location'),
+            reason_for_change=data.get('reason_for_change')
+        )
+
+        db.session.add(job_info)
+        db.session.commit()
+
+        return jsonify({"status": "success", "message": "Job info added successfully"}), 201
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"status": "error", "message": "Server error", "error": str(e)}), 500
+
+
+@user.route('/jobinfo', methods=['PUT'])
+def update_job_info():
+    try:
+        userID = g.user.get('userID') if g.user else None
+        if not userID:
+            return jsonify({"status": "error", "message": "Unauthorized"}), 401
+
+        user = User.query.get(userID)
+        if not user or not user.panelData:
+            return jsonify({"status": "error", "message": "User or panel data not found"}), 404
+
+        job_info = JobInfo.query.filter_by(panelData=user.panelData.id).first()
+        if not job_info:
+            return jsonify({"status": "error", "message": "No job info found"}), 404
+
+        data = request.get_json()
+        for field in [
+            'position', 'jobLevel', 'department', 'location', 'reporting_manager',
+            'total_time', 'employement_type', 'probation_period', 'notice_period',
+            'contract_number', 'contract_type', 'working_type', 'previous_position',
+            'transfer_location', 'reason_for_change'
+        ]:
+            if field in data:
+                setattr(job_info, field, data[field])
+
+        date_fields = {
+            'join_date': '%Y-%m-%d',
+            'start_date': '%Y-%m-%d',
+            'end_date': '%Y-%m-%d',
+            'position_date': '%Y-%m-%d',
+            'shift_time': '%Y-%m-%d %H:%M:%S'
+        }
+
+        for field, fmt in date_fields.items():
+            if data.get(field):
+                setattr(job_info, field, datetime.strptime(data[field], fmt))
+
+        db.session.commit()
+
+        return jsonify({"status": "success", "message": "Job info updated successfully"}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"status": "error", "message": "Server error", "error": str(e)}), 500
+
+
+@user.route('/jobinfo', methods=['GET'])
+def get_job_info():
+    try:
+        userID = g.user.get('userID') if g.user else None
+        if not userID:
+            return jsonify({"status": "error", "message": "Unauthorized"}), 401
+
+        user = User.query.get(userID)
+        if not user or not user.panelData:
+            return jsonify({"status": "error", "message": "User or panel data not found"}), 404
+
+        job_info = JobInfo.query.filter_by(panelData=user.panelData.id).first()
+        if not job_info:
+            return jsonify({"status": "error", "message": "Job info not found"}), 404
+
+        def fmt(date):
+            return date.strftime('%Y-%m-%d') if date else None
+
+        def fmt_dt(date):
+            return date.strftime('%Y-%m-%d %H:%M:%S') if date else None
+
+        return jsonify({
+            "status": "success",
+            "data": {
+                "position": job_info.position,
+                "jobLevel": job_info.jobLevel,
+                "department": job_info.department,
+                "location": job_info.location,
+                "reporting_manager": job_info.reporting_manager,
+                "join_date": fmt(job_info.join_date),
+                "total_time": job_info.total_time,
+                "employement_type": job_info.employement_type,
+                "probation_period": job_info.probation_period,
+                "notice_period": job_info.notice_period,
+                "contract_number": job_info.contract_number,
+                "contract_type": job_info.contract_type,
+                "start_date": fmt(job_info.start_date),
+                "end_date": fmt(job_info.end_date),
+                "working_type": job_info.working_type,
+                "shift_time": fmt_dt(job_info.shift_time),
+                "previous_position": job_info.previous_position,
+                "position_date": fmt(job_info.position_date),
+                "transfer_location": job_info.transfer_location,
+                "reason_for_change": job_info.reason_for_change
+            }
+        }), 200
+
+    except Exception as e:
+        return jsonify({"status": "error", "message": "Server error", "error": str(e)}), 500
