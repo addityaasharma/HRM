@@ -1012,10 +1012,11 @@ def employeeCreation():
         if not superadmin:
             return jsonify({"status": "error", "message": "No superadmin found"}), 404
 
+        # 1. Create the user
         newUser = User(
             superadminId=superadminID,
             userName=data.get('userName'),
-            email=data.get('email'),
+            email=email,
             password=generate_password_hash(data.get('password')),
             userRole=data.get('userRole'),
             gender=data.get('gender'),
@@ -1024,8 +1025,13 @@ def employeeCreation():
         )
 
         db.session.add(newUser)
-        db.session.commit()
+        db.session.flush()  # Get newUser.id without full commit
 
+        # 2. Create UserPanelData for this user
+        user_panel = UserPanelData(userPersonalData=newUser.id)
+        db.session.add(user_panel)
+
+        # 3. Handle optional access permissions
         raw_access = data.get('access')
         if raw_access:
             try:
@@ -1043,16 +1049,17 @@ def employeeCreation():
                             allowed=bool(allowed)
                         )
                         db.session.add(new_access)
-                db.session.commit()
             except Exception as access_error:
                 db.session.rollback()
                 return jsonify({
                     "status": "error",
                     "message": "User created, but access assignment failed",
                     "error": str(access_error)
-                }), 207 
+                }), 207
 
-        return jsonify({"status": "success", "message": "User created successfully"}), 201
+        db.session.commit()
+
+        return jsonify({"status": "success", "message": "User and panel data created successfully"}), 201
 
     except Exception as e:
         db.session.rollback()
@@ -4463,7 +4470,6 @@ def get_admin_chat(with_empId):
             "message": "Internal Server Error",
             "error": str(e)
         }), 500
-
 
 
 

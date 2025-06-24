@@ -1470,7 +1470,7 @@ def send_message():
             return jsonify({"status": "error", "message": "User not found"}), 400
 
         if not user.panelData:
-            return jsonify({"status": "error", "message": "Panel data not found"}), 404
+            return jsonify({"status": "error", "message": "Panel data not found"}), 200
 
         recieverId = request.form.get('recieverID')  # this should be empId or superId
         message_text = request.form.get('message')
@@ -1488,7 +1488,7 @@ def send_message():
         else:
             admin = SuperAdmin.query.filter_by(superId=recieverId).first()
             if not admin:
-                return jsonify({"status": "error", "message": "Receiver not found"}), 404
+                return jsonify({"status": "error", "message": "Receiver not found"}), 200
             reciever_empId = admin.superId 
 
         file_url = None
@@ -1546,6 +1546,7 @@ def send_message():
             "error": str(e)
         }), 500
 
+
 @user.route('/message/<string:with_empId>', methods=['GET'])
 def get_chat_messages(with_empId):
     try:
@@ -1554,12 +1555,19 @@ def get_chat_messages(with_empId):
             return jsonify({"status": "error", "message": "No user or auth token provided"}), 404
 
         user = User.query.filter_by(id=userID).first()
-        if not user or not user.panelData:
-            return jsonify({"status": "error", "message": "User or panel data not found"}), 404
+        if not user:
+            return jsonify({"status": "error", "message": "User not found"}), 404
+
+        if not user.panelData:
+            return jsonify({"status": "error", "message": "User panel data not found"}), 404
 
         sender_empId = user.empId
 
-        # Fetch all chats between user and given empId (user or admin)
+        receiver_user = User.query.filter_by(empId=with_empId).first()
+        receiver_admin = SuperAdmin.query.filter_by(superId=with_empId).first()
+        if not receiver_user and not receiver_admin:
+            return jsonify({"status": "error", "message": "Receiver user or admin not found"}), 404
+
         chats = UserChat.query.filter(
             ((UserChat.senderID == sender_empId) & (UserChat.recieverID == with_empId)) |
             ((UserChat.senderID == with_empId) & (UserChat.recieverID == sender_empId))
@@ -1567,18 +1575,9 @@ def get_chat_messages(with_empId):
 
         messages = []
         for chat in chats:
-            if chat.image_url:
-                ext = os.path.splitext(chat.image_url)[1].lower()
-                if ext in ['.jpg', '.jpeg', '.png']:
-                    message_type = "image"
-                else:
-                    message_type = "file"
-            else:
-                message_type = "text"
-
-            image_url = None
-            if chat.image_url:
-                image_url = url_for('static', filename=chat.image_url.replace('static/', ''), _external=True)
+            ext = os.path.splitext(chat.image_url)[1].lower() if chat.image_url else ''
+            message_type = "image" if ext in ['.jpg', '.jpeg', '.png'] else ("file" if ext else "text")
+            image_url = url_for('static', filename=chat.image_url.replace('static/', ''), _external=True) if chat.image_url else None
 
             messages.append({
                 "id": chat.id,
@@ -1601,7 +1600,6 @@ def get_chat_messages(with_empId):
             "message": "Internal server error",
             "error": str(e)
         }), 500
-
 
 
 # ====================================
