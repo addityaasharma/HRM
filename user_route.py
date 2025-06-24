@@ -1511,7 +1511,6 @@ def send_message():
             else:
                 message_type = 'file' if not message_text else 'text_file'
 
-        # Save message
         message = UserChat(
             panelData=user.panelData.id,
             senderID=user.empId,
@@ -1532,7 +1531,7 @@ def send_message():
             'file_url': file_url,
             'message_type': message_type,
             'timestamp': str(message.created_at)
-        }, room=reciever_empId)
+        }, room=str(reciever_empId))
 
         socketio.emit('message_sent', {'status': 'success'}, room=user.empId)
 
