@@ -584,7 +584,7 @@ def create_company_details():
 @superAdminBP.route('/punchdetails', methods=['GET'])
 def all_punchDetails():
     try:
-        superadmin, err, status = get_authorized_superadmin(required_section="attendance", required_permissions="view")
+        superadmin, err, status = get_authorized_superadmin(required_section="employee", required_permissions="view")
         if err:
             return err, status
 
@@ -677,7 +677,7 @@ def editPunchDetails(punchId):
         }), 404
     
     try:
-        superadmin, err, status = get_authorized_superadmin(required_section="attendance", required_permissions="edit")
+        superadmin, err, status = get_authorized_superadmin(required_section="employee", required_permissions="edit")
         if err:
             return err, status
         
@@ -1398,7 +1398,7 @@ def get_assigned_tickets():
 @superAdminBP.route('/userleave', methods=['GET'])
 def user_leaves():
     try:
-        superadmin, err, status = get_authorized_superadmin(required_section="leave", required_permissions="view")
+        superadmin, err, status = get_authorized_superadmin(required_section="employee", required_permissions="view")
         if err:
             return err, status
         
@@ -1494,7 +1494,7 @@ def user_leaves():
 @superAdminBP.route('/userleave/<int:leave_id>', methods=['PUT'])
 def update_user_leave_status(leave_id):
     try:
-        superadmin, err, status = get_authorized_superadmin(required_section="leave", required_permissions="edit")
+        superadmin, err, status = get_authorized_superadmin(required_section="employee", required_permissions="edit")
         if err:
             return err, status
 
@@ -1748,7 +1748,7 @@ def documents():
                 "message": "File type not allowed. Allowed: pdf, doc, docx, xls, xlsx, txt"
             }), 400
 
-        superadmin, err, status = get_authorized_superadmin(required_section="documents", required_permissions="edit")
+        superadmin, err, status = get_authorized_superadmin(required_section="admin", required_permissions="edit")
         if err:
             return err, status
 
@@ -1791,7 +1791,7 @@ def documents():
 @superAdminBP.route('/documents/<int:id>', methods=['PUT'])
 def edit_document(id):
     try:
-        superadmin, err, status = get_authorized_superadmin(required_section="documents", required_permissions="view")
+        superadmin, err, status = get_authorized_superadmin(required_section="admin", required_permissions="view")
         if err:
             return err, status
 
@@ -1822,7 +1822,7 @@ def edit_document(id):
 @superAdminBP.route('/documents', methods=['GET'])
 def document_details():
     try:
-        superadmin, err, status = get_authorized_superadmin(required_section="documents", required_permissions="view")
+        superadmin, err, status = get_authorized_superadmin(required_section="admin", required_permissions="view")
         if err:
             return err, status
 
@@ -1860,7 +1860,7 @@ def document_details():
 @superAdminBP.route('/documents/<int:id>', methods=['DELETE'])
 def delete_details(id):
     try:
-        superadmin, err, status = get_authorized_superadmin(required_section="documents", required_permissions="delete")
+        superadmin, err, status = get_authorized_superadmin(required_section="admin", required_permissions="delete")
         if err:
             return err, status
         
@@ -1890,7 +1890,7 @@ def delete_details(id):
 @superAdminBP.route('/announcement', methods=['POST'])
 def create_announcement():
     try:
-        superadmin, err, status = get_authorized_superadmin(required_section="announcement", required_permissions="edit")
+        superadmin, err, status = get_authorized_superadmin(required_section="policy", required_permissions="edit")
         if err:
             return err, status
 
@@ -1995,7 +1995,7 @@ def create_announcement():
 @superAdminBP.route('/announcement/<int:id>', methods=['DELETE'])
 def delete_announcement(id):
     try:
-        superadmin, err, status = get_authorized_superadmin(required_section="announcement", required_permissions="delete")
+        superadmin, err, status = get_authorized_superadmin(required_section="policy", required_permissions="delete")
         if err:
             return err, status
 
@@ -2027,7 +2027,7 @@ def delete_announcement(id):
 def get_announcement():
     try:
         superadmin, err, status = get_authorized_superadmin(
-            required_section="announcement",
+            required_section="policy",
             required_permissions="view"
         )
         if err:
@@ -2834,7 +2834,7 @@ def delete_payroll(id):
 @superAdminBP.route('/notice', methods=['POST'])
 def add_notice():
     try:
-        superadmin, err, status = get_authorized_superadmin(required_section="notice", required_permissions="edit")
+        superadmin, err, status = get_authorized_superadmin(required_section="policy", required_permissions="edit")
         if err:
             return err, status
 
@@ -2877,7 +2877,7 @@ def add_notice():
 @superAdminBP.route('/notice', methods=['GET'])
 def get_notices():
     try:
-        superadmin, err, status = get_authorized_superadmin(required_section="notice", required_permissions="view")
+        superadmin, err, status = get_authorized_superadmin(required_section="policy", required_permissions="view")
         if err:
             return err, status
 
@@ -2921,7 +2921,7 @@ def get_notices():
 @superAdminBP.route('/notice/<int:notice_id>', methods=['DELETE'])
 def delete_notice(notice_id):
     try:
-        superadmin, err, status = get_authorized_superadmin(required_section="notice", required_permissions="edit")
+        superadmin, err, status = get_authorized_superadmin(required_section="policy", required_permissions="edit")
         if err:
             return err, status
 
@@ -3376,7 +3376,7 @@ def get_upcoming_birthdays():
 @superAdminBP.route('/holiday', methods=['POST'])
 def add_holidays():
     try:
-        superadmin, err, status = get_authorized_superadmin(required_section="holiday", required_permissions="edit")
+        superadmin, err, status = get_authorized_superadmin(required_section="policy", required_permissions="edit")
         if err:
             return err, status
 
@@ -3458,7 +3458,7 @@ def add_holidays():
 @superAdminBP.route('/holiday', methods=['GET'])
 def get_holiday():
     try:
-        superadmin, err, status = get_authorized_superadmin(required_section="holiday", required_permissions="view")
+        superadmin, err, status = get_authorized_superadmin(required_section="policy", required_permissions="view")
         if err:
             return err, status
 
@@ -3499,7 +3499,7 @@ def get_holiday():
 @superAdminBP.route('/holiday/<int:holiday_id>', methods=['PUT'])
 def toggle_holiday(holiday_id):
     try:
-        superadmin, err, status = get_authorized_superadmin(required_section="holiday", required_permissions="edit")
+        superadmin, err, status = get_authorized_superadmin(required_section="policy", required_permissions="edit")
         if err:
             return err, status
 

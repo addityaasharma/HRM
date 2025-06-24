@@ -265,14 +265,14 @@ def punch_details():
 
         shift = ShiftTimeManagement.query.filter_by(
             shiftType=user.shift,
-            shiftStatus='enable',
+            shiftStatus=True,
             superpanel=superadmin.superadminPanel.id
         ).first()
 
         if not shift:
             return jsonify({
                 'status': 'error',
-                'message': f'No active {user.shift} shift set by admin'
+                'message': f'No active {user.shift} set by admin'
             }), 404
 
         try:
@@ -461,7 +461,7 @@ def edit_punchDetails(punchId):
 
         shift = ShiftTimeManagement.query.filter_by(
             shiftType=user.shift,
-            shiftStatus='enable',
+            shiftStatus=True,
             superpanel=superadmin.superadminPanel.id
         ).first()
 
@@ -618,7 +618,7 @@ def edit_Profile():
             'adharNumber', 'uanNumber', 'department', 'onBoardingStatus',
             'sourceOfHire', 'currentSalary', 'joiningDate', 'schoolName',
             'degree', 'fieldOfStudy', 'dateOfCompletion', 'skills',
-            'occupation', 'company', 'experience', 'duration', 'birthday'
+            'occupation', 'company', 'experience', 'duration', 'birthday','shift'
         ]
 
         if file:

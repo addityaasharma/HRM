@@ -21,6 +21,7 @@ CORS(app, supports_credentials=True,
      resources={r"/*": {"origins": [
          "http://localhost:5173",
          "https://wzl6mwg3-5000.inc1.devtunnels.ms",
+         "https://48qphfmd-5173.inc1.devtunnels.ms",
          "https://hrms-admin-dashboard-xi.vercel.app",
      ]}},
      expose_headers=["Content-Type", "Authorization"],

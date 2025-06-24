@@ -4,6 +4,7 @@ socketio = SocketIO(cors_allowed_origins="*", async_mode='eventlet')
 
 @socketio.on('connect')
 def handle_connect():
+    socketio.emit('Hello',"hello")
     print('✅ Client connected')
 
 @socketio.on('join')
