@@ -705,7 +705,7 @@ def raise_ticket():
         db.session.add(ticket)
         db.session.commit()
 
-        superadmin = user.superadmin
+        superadmin = SuperAdmin.query.filter_by(superId=user.superadminId).first()
         if superadmin:
             socketio.emit(
                 'ticket_notification',
@@ -1365,12 +1365,36 @@ def all_users(id):
 
         adminID = user.superadminId
         superadmin = SuperAdmin.query.filter_by(superId=adminID).first()
-        if not superadmin or not superadmin.superadminPanel or not superadmin.superadminPanel.allUsers:
-            return jsonify({"status": "error", "message": "No Admin or users found associated with you"}), 200
 
-        all_users = superadmin.superadminPanel.allUsers
+        if not superadmin or not superadmin.superadminPanel:
+            return jsonify({"status": "error", "message": "No Admin panel found"}), 404
 
+        all_users = superadmin.superadminPanel.allUsers or []
+
+        # Inject superadmin into the users list as a virtual colleague
+        admin_user = {
+            'id': superadmin.id,
+            'userName': superadmin.companyName,
+            'email': superadmin.companyEmail,
+            'empId': superadmin.superId,
+            'department': "Admin",
+            'source_of_hire': "N/A",
+            'PAN': None,
+            'UAN': None,
+            'joiningDate': None,
+            'userType': 'admin'
+        }
+
+        # Handle fetch by specific ID (admin or user)
         if id != 0:
+            # Check admin
+            if id == superadmin.id:
+                return jsonify({
+                    "status": "success",
+                    "user": admin_user
+                }), 200
+
+            # Check user
             user_detail = next((u for u in all_users if u.id == id), None)
             if not user_detail:
                 return jsonify({"status": "error", "message": "User not found"}), 404
@@ -1386,30 +1410,34 @@ def all_users(id):
                     'source_of_hire': user_detail.sourceOfHire,
                     'PAN': user_detail.panNumber,
                     'UAN': user_detail.uanNumber,
-                    'joiningDate': user_detail.joiningDate
+                    'joiningDate': user_detail.joiningDate,
+                    'userType': 'user'
                 }
             }), 200
 
+        # If id == 0, return paginated list of all users + admin
         page = int(request.args.get('page', 1))
         limit = int(request.args.get('limit', 10))
         start = (page - 1) * limit
         end = start + limit
-        total_users = len(all_users)
-        paginated_users = all_users[start:end]
 
-        userList = []
-        for u in paginated_users:
-            userList.append({
-                'id': u.id,
-                'userName': u.userName,
-                'email': u.email,
-                'empId': u.empId,
-                'department': u.department,
-                'source_of_hire': u.sourceOfHire,
-                'PAN': u.panNumber,
-                'UAN': u.uanNumber,
-                'joiningDate': u.joiningDate
-            })
+        userList = [{
+            'id': u.id,
+            'userName': u.userName,
+            'email': u.email,
+            'empId': u.empId,
+            'department': u.department,
+            'source_of_hire': u.sourceOfHire,
+            'PAN': u.panNumber,
+            'UAN': u.uanNumber,
+            'joiningDate': u.joiningDate,
+            'userType': 'user'
+        } for u in all_users]
+
+        userList.insert(0, admin_user)  # Admin on top
+
+        total_users = len(userList)
+        paginated_users = userList[start:end]
 
         return jsonify({
             "status": "success",
@@ -1418,12 +1446,16 @@ def all_users(id):
             "limit": limit,
             "total_users": total_users,
             "total_pages": (total_users + limit - 1) // limit,
-            "users": userList
+            "users": paginated_users
         }), 200
 
     except Exception as e:
         db.session.rollback()
-        return jsonify({"status": "error", "message": "Internal Server Error", "error": str(e)}), 500
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e)
+        }), 500
 
 
 @user.route('/message', methods=['POST'])
@@ -1440,34 +1472,36 @@ def send_message():
         if not user.panelData:
             return jsonify({"status": "error", "message": "Panel data not found"}), 404
 
-        recieverId = request.form.get('recieverID')
+        recieverId = request.form.get('recieverID')  # this should be empId or superId
         message_text = request.form.get('message')
-        uploaded_file = request.files.get('file') 
+        uploaded_file = request.files.get('file')
 
         if not recieverId:
             return jsonify({"status": "error", "message": "Receiver ID is required"}), 400
         if not message_text and not uploaded_file:
             return jsonify({"status": "error", "message": "Message or file is required"}), 400
 
-        reciever = User.query.filter_by(id=recieverId).first()
-        if not reciever:
-            return jsonify({"status": "error", "message": "Receiver not found"}), 404
-
-        superadmin = SuperAdmin.query.filter_by(superId=reciever.superadminId).first()
-        if not superadmin:
-            return jsonify({"status": "error", "message": "Receiver not found"}), 400
+        # First check if receiver is a User
+        reciever = User.query.filter_by(empId=recieverId).first()
+        if reciever:
+            reciever_empId = reciever.empId
+        else:
+            # Else check if receiver is an Admin by superId
+            admin = SuperAdmin.query.filter_by(superId=recieverId).first()
+            if not admin:
+                return jsonify({"status": "error", "message": "Receiver not found"}), 404
+            reciever_empId = admin.superId  # superId used like empId
 
         file_url = None
         message_type = 'text'
 
         if uploaded_file:
             filename = secure_filename(uploaded_file.filename)
-            file_ext = filename.rsplit('.', 1)[-1].lower()
             mimetype = uploaded_file.mimetype
+            file_ext = os.path.splitext(filename)[-1].lower()
 
             folder_path = os.path.join('static', 'uploads', 'chat_files')
             os.makedirs(folder_path, exist_ok=True)
-
             filepath = os.path.join(folder_path, filename)
             uploaded_file.save(filepath)
             file_url = filepath
@@ -1477,10 +1511,11 @@ def send_message():
             else:
                 message_type = 'file' if not message_text else 'text_file'
 
+        # Save message
         message = UserChat(
             panelData=user.panelData.id,
             senderID=user.empId,
-            recieverID=reciever.empId,
+            recieverID=reciever_empId,
             message=message_text if message_text else None,
             image_url=file_url,
             created_at=datetime.utcnow(),
@@ -1490,14 +1525,15 @@ def send_message():
         db.session.add(message)
         db.session.commit()
 
+        # Emit to the receiver's room (use empId or superId as room key)
         socketio.emit('receive_message', {
             'senderID': user.empId,
-            'recieverID': reciever.empId,
+            'recieverID': reciever_empId,
             'message': message_text,
             'file_url': file_url,
             'message_type': message_type,
             'timestamp': str(message.created_at)
-        }, room=recieverId)
+        }, room=reciever_empId)
 
         socketio.emit('message_sent', {'status': 'success'}, room=user.empId)
 
@@ -1510,7 +1546,6 @@ def send_message():
             "message": "Internal Server Error",
             "error": str(e)
         }), 500
-
 
 @user.route('/message/<string:with_empId>', methods=['GET'])
 def get_chat_messages(with_empId):
@@ -1525,6 +1560,7 @@ def get_chat_messages(with_empId):
 
         sender_empId = user.empId
 
+        # Fetch all chats between user and given empId (user or admin)
         chats = UserChat.query.filter(
             ((UserChat.senderID == sender_empId) & (UserChat.recieverID == with_empId)) |
             ((UserChat.senderID == with_empId) & (UserChat.recieverID == sender_empId))
@@ -1532,20 +1568,28 @@ def get_chat_messages(with_empId):
 
         messages = []
         for chat in chats:
-            message_data = {
+            if chat.image_url:
+                ext = os.path.splitext(chat.image_url)[1].lower()
+                if ext in ['.jpg', '.jpeg', '.png']:
+                    message_type = "image"
+                else:
+                    message_type = "file"
+            else:
+                message_type = "text"
+
+            image_url = None
+            if chat.image_url:
+                image_url = url_for('static', filename=chat.image_url.replace('static/', ''), _external=True)
+
+            messages.append({
                 "id": chat.id,
                 "senderID": chat.senderID,
                 "receiverID": chat.recieverID,
                 "message": chat.message,
-                "image_url": None,
-                "message_type": "image" if chat.image_url else "text",
+                "image_url": image_url,
+                "message_type": message_type,
                 "created_at": chat.created_at.isoformat()
-            }
-
-            if chat.image_url:
-                message_data["image_url"] = url_for('static', filename=chat.image_url.replace('static/', ''), _external=True)
-
-            messages.append(message_data)
+            })
 
         return jsonify({
             "status": "success",
@@ -1558,6 +1602,7 @@ def get_chat_messages(with_empId):
             "message": "Internal server error",
             "error": str(e)
         }), 500
+
 
 
 # ====================================

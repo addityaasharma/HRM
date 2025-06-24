@@ -21,7 +21,10 @@ from redis import Redis
 from sqlalchemy import func
 
 
+ALLOWED_EXTENSIONS = {'pdf', 'doc', 'docx', 'xls', 'xlsx', 'txt'}
 
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -1725,31 +1728,57 @@ def delete_leave(id):
 
 @superAdminBP.route('/documents', methods=['POST'])
 def documents():
-    title = request.form.get('title', '')
-    files = request.files.get('document')
     try:
+        title = request.form.get('title', '')
+        file = request.files.get('document')
+
+        if not file or file.filename == '':
+            return jsonify({"status": "error", "message": "No file selected"}), 400
+
+        if not allowed_file(file.filename):
+            return jsonify({
+                "status": "error",
+                "message": "File type not allowed. Allowed: pdf, doc, docx, xls, xlsx, txt"
+            }), 400
+
         superadmin, err, status = get_authorized_superadmin(required_section="documents", required_permissions="edit")
         if err:
             return err, status
-        
-        superpanelD = superadmin.superadminPanel.id
 
-        result = cloudinary.uploader.upload(files)
+        superpanel_id = superadmin.superadminPanel.id
+
+        # Upload to Cloudinary as raw file
+        result = cloudinary.uploader.upload(
+            file,
+            resource_type="raw"  # Required for non-image file types
+        )
         doc_url = result.get("secure_url")
 
-        adminDocs = AdminDoc(
-            superadminPanel= superpanelD,
-            document = doc_url,
-            title = title
+        adminDoc = AdminDoc(
+            superadminPanel=superpanel_id,
+            document=doc_url,
+            title=title
         )
 
-        db.session.add(adminDocs)
+        db.session.add(adminDoc)
         db.session.commit()
 
-        return jsonify({"status" : "success", "message" : "Uploaded successfully", "document" : {"doc_url" : doc_url, "title" : title}}),201
+        return jsonify({
+            "status": "success",
+            "message": "Document uploaded successfully",
+            "document": {
+                "title": title,
+                "url": doc_url
+            }
+        }), 201
 
     except Exception as e:
-        return jsonify({"status" : "error", "message" : "Internal Server Error", "error" : str(e)}), 500
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e)
+        }), 500
 
 
 @superAdminBP.route('/documents/<int:id>', methods=['PUT'])
@@ -3279,9 +3308,11 @@ def get_upcoming_birthdays():
                 "status": "error",
                 "message": "Unauthorized",
             }), 400
-        
+
+        # Check if user is superadmin
         superadmin = SuperAdmin.query.filter_by(id=userId).first()
         if not superadmin:
+            # If not, check if it's a user under a superadmin
             user = User.query.filter_by(id=userId).first()
             if not user:
                 return jsonify({
@@ -3294,24 +3325,26 @@ def get_upcoming_birthdays():
         if not allusers:
             return jsonify({
                 "status": "error",
-                "message": "No users yet"
+                "message": "No users found"
             }), 200
 
-        today = datetime.today()
+        today = datetime.today().date()
         upcoming_birthdays = []
 
         for u in allusers:
             if u.birthday:
-                birthday_this_year = u.birthday.replace(year=today.year)
+                birthday = u.birthday.date()
+                birthday_this_year = birthday.replace(year=today.year)
+
                 if birthday_this_year >= today:
                     upcoming_birthdays.append({
                         "id": u.id,
                         "userName": u.userName,
-                        "birthday": u.birthday.strftime('%Y-%m-%d'),
+                        "birthday": birthday.strftime('%Y-%m-%d'),
                         "profileImage": u.profileImage,
                     })
 
-        # Sort by nearest birthday
+        # Sort the birthdays by the upcoming date
         upcoming_birthdays.sort(key=lambda x: datetime.strptime(x["birthday"], '%Y-%m-%d').replace(year=today.year))
 
         return jsonify({
@@ -3327,7 +3360,6 @@ def get_upcoming_birthdays():
             "message": "Internal Server Error",
             "error": str(e),
         }), 500
-
 
 
 # ====================================
@@ -4677,6 +4709,8 @@ def get_assets():
         assets = AdminAssets.query.filter_by(superpanel=superpanel_id).all()
 
         asset_list = []
+        total_quantity = 0
+
         for asset in assets:
             asset_list.append({
                 "id": asset.id,
@@ -4686,11 +4720,12 @@ def get_assets():
                 "quantity": asset.quantity,
                 "invoice": asset.invoice
             })
+            total_quantity += asset.quantity if asset.quantity else 0
 
         return jsonify({
             "status": "success",
             "message": "Assets fetched successfully",
-            "total": len(asset_list),
+            "total": total_quantity,
             "data": asset_list
         }), 200
 
