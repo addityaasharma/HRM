@@ -3033,7 +3033,7 @@ def get_employee_documents():
 @superAdminBP.route('/project', methods=['POST'])
 def add_Project():
     try:
-        superadmin, err, status = get_authorized_superadmin(required_section="project", required_permissions="edit")
+        superadmin, err, status = get_authorized_superadmin(required_section="admin", required_permissions="edit")
         if err:
             return err, status
 
@@ -3126,7 +3126,7 @@ def add_Project():
 @superAdminBP.route('/project', methods=['GET'])
 def get_all_projects():
     try:
-        superadmin, err, status = get_authorized_superadmin(required_section="project", required_permissions="view")
+        superadmin, err, status = get_authorized_superadmin(required_section="admin", required_permissions="view")
         if err:
             return err, status
 
@@ -3192,7 +3192,7 @@ def get_all_projects():
 @superAdminBP.route('/project/<int:task_id>', methods=['DELETE'])
 def delete_project(task_id):
     try:
-        superadmin, err, status = get_authorized_superadmin(required_section="project", required_permissions="delete")
+        superadmin, err, status = get_authorized_superadmin(required_section="admin", required_permissions="delete")
         if err:
             return err, status
 
@@ -3227,7 +3227,7 @@ def delete_project(task_id):
 @superAdminBP.route('/project/<int:task_id>', methods=['PUT'])
 def update_project(task_id):
     try:
-        superadmin, err, status = get_authorized_superadmin(required_section="project", required_permissions="edit")
+        superadmin, err, status = get_authorized_superadmin(required_section="admin", required_permissions="edit")
         if err:
             return err, status
 
@@ -3545,7 +3545,7 @@ def toggle_holiday(holiday_id):
 @superAdminBP.route('/assets', methods=['GET'])
 def get_all_assets():
     try:
-        superadmin, err, status = get_authorized_superadmin(required_section="employee", required_permissions="view")
+        superadmin, err, status = get_authorized_superadmin(required_section="admin", required_permissions="view")
         if err:
             return err, status
 
@@ -3611,7 +3611,7 @@ def get_all_assets():
 @superAdminBP.route('/assets/<int:asset_id>', methods=['PUT'])
 def update_asset_status(asset_id):
     try:
-        superadmin, err, status = get_authorized_superadmin(required_section="employee", required_permissions="edit")
+        superadmin, err, status = get_authorized_superadmin(required_section="admin", required_permissions="edit")
         if err:
             return err, status
 
@@ -4577,7 +4577,7 @@ def get_admin_location():
 @superAdminBP.route('/assetstore', methods=['POST'])
 def add_assets():
     try:
-        superadmin, err, status = get_authorized_superadmin(required_section="assets", required_permissions="edit")
+        superadmin, err, status = get_authorized_superadmin(required_section="admin", required_permissions="edit")
         if err:
             return err, status
 
@@ -4633,7 +4633,7 @@ def add_assets():
 @superAdminBP.route('/assetstore/<int:asset_id>', methods=['PUT'])
 def edit_asset(asset_id):
     try:
-        superadmin, err, status = get_authorized_superadmin(required_section="assets", required_permissions="edit")
+        superadmin, err, status = get_authorized_superadmin(required_section="admin", required_permissions="edit")
         if err:
             return err, status
 
@@ -4679,7 +4679,7 @@ def edit_asset(asset_id):
 @superAdminBP.route('/assetstore/<int:asset_id>', methods=['DELETE'])
 def delete_asset(asset_id):
     try:
-        superadmin, err, status = get_authorized_superadmin(required_section="assets", required_permissions="delete")
+        superadmin, err, status = get_authorized_superadmin(required_section="admin", required_permissions="delete")
         if err:
             return err, status
 
@@ -4707,7 +4707,7 @@ def delete_asset(asset_id):
 @superAdminBP.route('/assetstore', methods=['GET'])
 def get_assets():
     try:
-        superadmin, err, status = get_authorized_superadmin(required_section="assets", required_permissions="view")
+        superadmin, err, status = get_authorized_superadmin(required_section="admin", required_permissions="view")
         if err:
             return err, status
 
