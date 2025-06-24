@@ -18,6 +18,7 @@ import random,os
 from dateutil import parser
 import string, math
 import os, calendar
+from pytz import timezone
 
 
 
@@ -1524,7 +1525,6 @@ def send_message():
         db.session.add(message)
         db.session.commit()
 
-        # Emit to the receiver's room (use empId or superId as room key)
         socketio.emit('receive_message', {
             'senderID': user.empId,
             'recieverID': reciever_empId,
@@ -1586,7 +1586,7 @@ def get_chat_messages(with_empId):
                 "message": chat.message,
                 "image_url": image_url,
                 "message_type": message_type,
-                "created_at": chat.created_at.isoformat()
+                "created_at": chat.created_at.astimezone(timezone('Asia/Kolkata')).isoformat()
             })
 
         return jsonify({
