@@ -1486,11 +1486,10 @@ def send_message():
         if reciever:
             reciever_empId = reciever.empId
         else:
-            # Else check if receiver is an Admin by superId
             admin = SuperAdmin.query.filter_by(superId=recieverId).first()
             if not admin:
                 return jsonify({"status": "error", "message": "Receiver not found"}), 404
-            reciever_empId = admin.superId  # superId used like empId
+            reciever_empId = admin.superId 
 
         file_url = None
         message_type = 'text'
