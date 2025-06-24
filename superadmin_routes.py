@@ -1,4 +1,4 @@
-from models import SuperAdmin, SuperAdminPanel, db, PunchData, User, UserTicket, AdminLeave, AdminDoc, Announcement, AdminLeave, BonusPolicy, UserLeave, UserPanelData, ShiftTimeManagement, RemotePolicy, PayrollPolicy, Notice, TaskManagement, TaskUser, TaskComments, AdminDetail, Likes, AdminHoliday, ProductAsset, AdminDepartment, TicketAssignmentLog, UserAccess, UserPromotion, UserSalaryDetails, UserChat, AdminLocation, Master
+from models import SuperAdmin, SuperAdminPanel, db, PunchData, User, UserTicket, AdminLeave, AdminDoc, Announcement, AdminLeave, BonusPolicy, UserLeave, UserPanelData, ShiftTimeManagement, RemotePolicy, PayrollPolicy, Notice, TaskManagement, TaskUser, TaskComments, AdminDetail, Likes, AdminHoliday, ProductAsset, AdminDepartment, TicketAssignmentLog, UserAccess, UserPromotion, UserSalaryDetails, UserChat, AdminLocation, Master, AdminAssets
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask import Blueprint, request, jsonify, g
 from otp_utils import send_otp, generate_otp, redis
@@ -351,6 +351,7 @@ def get_myDetails():
                 "companyEmail": superadmin.companyEmail,
                 "company_type": superadmin.company_type,
                 "company_website": superadmin.company_website,
+                "company_image": superadmin.company_image,
                 "company_estabilish": superadmin.company_estabilish.strftime('%Y-%m-%d') if superadmin.company_estabilish else None,
                 "company_years": superadmin.company_years,
                 "is_super_admin": superadmin.is_super_admin,
@@ -420,7 +421,7 @@ def get_myDetails():
             "created_at": user.created_at.strftime('%Y-%m-%d %H:%M:%S') if user.created_at else None
         }
 
-        return jsonify({"status": "success", "message": "Fetched Successfully", "data": len(userDetails)}), 200
+        return jsonify({"status": "success", "message": "Fetched Successfully", "data": userDetails}), 200
 
     except Exception as e:
         db.session.rollback()
@@ -441,7 +442,14 @@ def edit_myDetails():
         superadmin = SuperAdmin.query.filter_by(id=userId).first()
         if not superadmin:
             return jsonify({"status": "error", "message": "SuperAdmin not found"}), 404
-
+        
+        panel = superadmin.superadminPanel
+        if not panel or not panel.adminDetails:
+            return jsonify({
+                "status": "error",
+                "message": "Admin panel or admin details not found"
+            }), 404
+        
         data = request.form.to_dict()
         
         if 'company_image' in request.files:
@@ -4519,5 +4527,176 @@ def get_admin_location():
         return jsonify({
             "status": "error",
             "message": "Failed to fetch location",
+            "error": str(e)
+        }), 500
+
+
+# ====================================
+#      ADMIN SET INVENTORY SECTION         - admin set location of office  
+# ====================================
+
+
+@superAdminBP.route('/assetstore', methods=['POST'])
+def add_assets():
+    try:
+        superadmin, err, status = get_authorized_superadmin(required_section="assets", required_permissions="edit")
+        if err:
+            return err, status
+
+        data = request.form.to_dict()
+        invoice_file = request.files.get('invoice')
+
+        required_fields = ['productname', 'productmodel', 'warrantyDate', 'quantity']
+        if not all(field in data for field in required_fields):
+            return jsonify({
+                "status": "error",
+                "message": "Missing required fields"
+            }), 400
+
+        invoice_url = None
+        if invoice_file:
+            upload_result = cloudinary.uploader.upload(invoice_file)
+            invoice_url = upload_result.get("secure_url")
+
+        try:
+            warranty_date = datetime.strptime(data['warrantyDate'], '%Y-%m-%d')
+        except ValueError:
+            return jsonify({
+                "status": "error",
+                "message": "Invalid date format. Use YYYY-MM-DD"
+            }), 400
+
+        new_asset = AdminAssets(
+            productname=data['productname'],
+            productmodel=data['productmodel'],
+            warrantyDate=warranty_date,
+            quantity=int(data['quantity']),
+            invoice=invoice_url,
+            superpanel=superadmin.superadminPanel.id
+        )
+
+        db.session.add(new_asset)
+        db.session.commit()
+
+        return jsonify({
+            "status": "success",
+            "message": "Asset added successfully"
+        }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e)
+        }), 500
+
+
+@superAdminBP.route('/assetstore/<int:asset_id>', methods=['PUT'])
+def edit_asset(asset_id):
+    try:
+        superadmin, err, status = get_authorized_superadmin(required_section="assets", required_permissions="edit")
+        if err:
+            return err, status
+
+        asset = AdminAssets.query.filter_by(id=asset_id, superpanel=superadmin.superadminPanel.id).first()
+        if not asset:
+            return jsonify({"status": "error", "message": "Asset not found"}), 404
+
+        data = request.form.to_dict()
+        invoice_file = request.files.get('invoice')
+
+        if 'productname' in data:
+            asset.productname = data['productname']
+        if 'productmodel' in data:
+            asset.productmodel = data['productmodel']
+        if 'warrantyDate' in data:
+            try:
+                asset.warrantyDate = datetime.strptime(data['warrantyDate'], '%Y-%m-%d')
+            except ValueError:
+                return jsonify({"status": "error", "message": "Invalid date format. Use YYYY-MM-DD"}), 400
+        if 'quantity' in data:
+            asset.quantity = int(data['quantity'])
+
+        if invoice_file:
+            upload_result = cloudinary.uploader.upload(invoice_file)
+            asset.invoice = upload_result.get("secure_url")
+
+        db.session.commit()
+
+        return jsonify({
+            "status": "success",
+            "message": "Asset updated successfully"
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e)
+        }), 500
+
+
+@superAdminBP.route('/assetstore/<int:asset_id>', methods=['DELETE'])
+def delete_asset(asset_id):
+    try:
+        superadmin, err, status = get_authorized_superadmin(required_section="assets", required_permissions="delete")
+        if err:
+            return err, status
+
+        asset = AdminAssets.query.filter_by(id=asset_id, superpanel=superadmin.superadminPanel.id).first()
+        if not asset:
+            return jsonify({"status": "error", "message": "Asset not found"}), 404
+
+        db.session.delete(asset)
+        db.session.commit()
+
+        return jsonify({
+            "status": "success",
+            "message": "Asset deleted successfully"
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e)
+        }), 500
+
+
+@superAdminBP.route('/assetstore', methods=['GET'])
+def get_assets():
+    try:
+        superadmin, err, status = get_authorized_superadmin(required_section="assets", required_permissions="view")
+        if err:
+            return err, status
+
+        superpanel_id = superadmin.superadminPanel.id
+        assets = AdminAssets.query.filter_by(superpanel=superpanel_id).all()
+
+        asset_list = []
+        for asset in assets:
+            asset_list.append({
+                "id": asset.id,
+                "productname": asset.productname,
+                "productmodel": asset.productmodel,
+                "warrantyDate": asset.warrantyDate.strftime('%Y-%m-%d') if asset.warrantyDate else None,
+                "quantity": asset.quantity,
+                "invoice": asset.invoice
+            })
+
+        return jsonify({
+            "status": "success",
+            "message": "Assets fetched successfully",
+            "total": len(asset_list),
+            "data": asset_list
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
             "error": str(e)
         }), 500

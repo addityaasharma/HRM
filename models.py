@@ -74,7 +74,18 @@ class SuperAdminPanel(db.Model):
     adminHolidays = db.relationship('AdminHoliday', backref='superadminpanel', lazy=True)
     adminDepartment = db.relationship('AdminDepartment', backref='superadminpanel', lazy=True)
     adminLocation = db.relationship('AdminLocation', backref='superadminpanel', lazy=True, uselist=False)
+    adminAssets = db.relationship('AdminAssets', backref='superadminpanel', lazy=True, uselist=False)
 
+
+class AdminAssets(db.Model):
+    __tablename__ = 'adminassets'
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    productname = db.Column(db.String(120))
+    productmodel = db.Column(db.String(120))
+    warrantyDate = db.Column(db.DateTime)
+    quantity = db.Column(db.Integer)
+    invoice = db.Column(db.String(255))
+    superpanel = db.Column(db.Integer, db.ForeignKey('superadminpanel.id'), nullable=False)
 
 
 class AdminLocation(db.Model):

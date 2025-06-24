@@ -1295,6 +1295,7 @@ def get_user_salary():
             'status': 'success',
             'data': {
                 'payType': salary.payType,
+                'id': salary.id,
                 'ctc': salary.ctc,
                 'baseSalary': salary.baseSalary,
                 'currency': salary.currency,
