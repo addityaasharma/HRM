@@ -42,7 +42,8 @@ def auth_middleware(app):
 
         exempt_paths = [
             '/superadmin/login',
-            '/superadmin/signup',
+            '/master/signup',
+            '/master/login',
             '/user/verify-signup',
             '/user/signup',
             '/user/login'

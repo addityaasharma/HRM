@@ -1,6 +1,7 @@
-from models import SuperAdmin, SuperAdminPanel, db, PunchData, User, UserTicket, AdminLeave, AdminDoc, Announcement, AdminLeave, BonusPolicy, UserLeave, UserPanelData, ShiftTimeManagement, RemotePolicy, PayrollPolicy, Notice, TaskManagement, TaskUser, TaskComments, AdminDetail, Likes, AdminHoliday, ProductAsset, AdminDepartment, TicketAssignmentLog, UserAccess, UserPromotion, UserSalaryDetails, UserChat, AdminLocation
+from models import SuperAdmin, SuperAdminPanel, db, PunchData, User, UserTicket, AdminLeave, AdminDoc, Announcement, AdminLeave, BonusPolicy, UserLeave, UserPanelData, ShiftTimeManagement, RemotePolicy, PayrollPolicy, Notice, TaskManagement, TaskUser, TaskComments, AdminDetail, Likes, AdminHoliday, ProductAsset, AdminDepartment, TicketAssignmentLog, UserAccess, UserPromotion, UserSalaryDetails, UserChat, AdminLocation, Master
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask import Blueprint, request, jsonify, g
+from otp_utils import send_otp, generate_otp, redis
 from werkzeug.utils import secure_filename
 from datetime import datetime, timedelta
 from socket_instance import socketio
@@ -16,6 +17,8 @@ import math, holidays
 import re, json
 import random 
 import string
+from redis import Redis
+
 
 
 logging.basicConfig(level=logging.INFO)
@@ -97,41 +100,107 @@ def get_authorized_superadmin(required_section=None, required_permissions=None):
 #         SUPERADMIN SECTION          
 # ==================================== 
 
+
+@superAdminBP.route('/signup-otp', methods=['POST'])
+def request_otp():
+    userID = g.user.get('userID') if g.user else None
+    if not userID:
+        return jsonify({
+            "status" : "error",
+            "message" : "Unauthorized",
+        }), 404
+    
+    masteradmin = Master.query.filter_by(id=userID).first()
+    if not masteradmin:
+        return jsonify({
+            "status" : "error",
+            "message" : "Unauthorized"
+        }), 404
+    
+    data = request.get_json()
+    email = data.get('companyEmail')
+
+    if not email:
+        return jsonify({'status': 'error', 'message': 'Email is required'}), 400
+
+    otp = generate_otp()
+    redis.setex(f"otp:{email}", 300, otp)  # store OTP for 5 minutes
+
+    if send_otp(email, otp):
+        return jsonify({'status': 'success', 'message': 'OTP sent to email'}), 200
+    else:
+        return jsonify({'status': 'error', 'message': 'Failed to send OTP'}), 500
+
+
+
 @superAdminBP.route('/signup', methods=['POST'])
 def supAdmin_signup():
     try:
+        userID = g.user.get('userID') if g.user else None
+        if not userID:
+            return jsonify({
+                "status": "Error",
+                "message": "Unauthorized",
+            }), 404
+
+        masterAdmin = Master.query.filter_by(id=userID).first()
+        if not masterAdmin:
+            return jsonify({
+                "status": "error",
+                "message": "Unauthorized",
+            }), 404
+
         data = request.get_json()
         if not data:
             return jsonify({'message': 'Invalid or missing JSON body'}), 400
 
-        required_fields = ['companyName', 'companyEmail', 'company_password', 'is_super_admin']
+        required_fields = ['companyName', 'companyEmail', 'company_password', 'is_super_admin', 'otp', 'expiry']
         if not all(field in data for field in required_fields):
             return jsonify({'message': 'All fields are required'}), 400
 
-        if SuperAdmin.query.filter_by(companyEmail=data['companyEmail']).first():
+        email = data['companyEmail']
+        input_otp = data['otp']
+        stored_otp = redis.get(f"otp:{email}")
+
+        if not stored_otp or input_otp != stored_otp.decode():
+            return jsonify({'status': 'error', 'message': 'Invalid or expired OTP'}), 401
+
+        if SuperAdmin.query.filter_by(companyEmail=email).first():
             return jsonify({'message': 'User with this email already exists'}), 400
 
         last_admin = SuperAdmin.query.order_by(desc(SuperAdmin.id)).first()
         last_super_id = last_admin.superId if last_admin else None
-
         super_id = generate_super_id_from_last(last_super_id)
+
+        expiry = data.get('expiry')
+        try:
+            expiry_date = datetime.strptime(expiry, "%Y-%m-%d")
+        except ValueError:
+            return jsonify({
+                "status": "error",
+                "message": "Invalid expiry date format. Use YYYY-MM-DD"
+            }), 400
 
         newAdmin = SuperAdmin(
             superId=super_id,
             companyName=data.get('companyName'),
-            companyEmail=data.get('companyEmail'),
+            companyEmail=email,
             company_type=data.get('company_type'),
             company_website=data.get('company_website'),
             company_estabilish=data.get('company_estabilish'),
             company_years=data.get('company_years'),
             company_password=generate_password_hash(data.get('company_password')),
-            is_super_admin=data.get('is_super_admin')
+            is_super_admin=data.get('is_super_admin'),
+            master_id=masterAdmin.masteradminPanel.id,
+            expiry_date=expiry_date  # <-- Setting expiry
         )
 
         db.session.add(newAdmin)
-        db.session.flush() 
+        db.session.flush()
         newAdmin.superadminPanel = SuperAdminPanel()
         db.session.commit()
+
+        redis.delete(f"otp:{email}")
 
         access_token, refresh_token = create_tokens(user_id=newAdmin.id, role='super_admin')
 
@@ -143,7 +212,8 @@ def supAdmin_signup():
                 'superId': newAdmin.superId,
                 'companyName': newAdmin.companyName,
                 'companyEmail': newAdmin.companyEmail,
-                'panelData': newAdmin.superadminPanel.id
+                'panelData': newAdmin.superadminPanel.id,
+                'expiry_date': newAdmin.expiry_date.strftime('%Y-%m-%d')
             },
             'tokens': {
                 'access_token': access_token,
@@ -176,6 +246,11 @@ def superadmin_login():
 
     # Try SuperAdmin first
     exist_admin = SuperAdmin.query.filter_by(companyEmail=email).first()
+    if exist_admin.expiry_date and exist_admin.expiry_date < datetime.utcnow():
+        return jsonify({
+            'status': 'error',
+            'message': 'Your account has expired. Please contact support.',
+            }), 403
 
     if exist_admin:
         if not check_password_hash(exist_admin.company_password, password):
@@ -220,7 +295,7 @@ def superadmin_login():
 
 
     user = User.query.filter_by(email=email).first()
-    if user and not user.userRole.lower() == 'hr':
+    if user:
         if not check_password_hash(user.password, password):  # Assumes User model has `password` field
             return jsonify({
                 'status': 'error',

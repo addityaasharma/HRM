@@ -12,7 +12,14 @@ class Master(db.Model):
     name = db.Column(db.String(100), nullable=False)
     company_email = db.Column(db.String(120), nullable=False)
     company_password = db.Column(db.String(120), nullable=False)
-    # admins = db.relationship('SuperAdmin', backref='master', lazy=True)
+    masteradminPanel = db.relationship('MasterPanel',backref='master', uselist=False, lazy=True)
+
+
+class MasterPanel(db.Model):
+    __tablename__ = 'masteradminpanel'
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    masterid = db.Column(db.Integer, db.ForeignKey('master.id'), nullable=False)
+    allSuperAdmins = db.relationship('SuperAdmin', backref='masterpanel',lazy=True)
 
 # ====================================
 #            SUPERADMIN SECTION
@@ -33,7 +40,8 @@ class SuperAdmin(db.Model):
     company_estabilish = db.Column(db.DateTime)
     company_years = db.Column(db.Integer)
     is_super_admin = db.Column(db.Boolean)
-    # master_id = db.Column(db.Integer, db.ForeignKey('master.id'), nullable=False)
+    expiry_date = db.Column(db.DateTime, nullable=True)
+    master_id = db.Column(db.Integer, db.ForeignKey('masteradminpanel.id'), nullable=False)
     superadminPanel = db.relationship('SuperAdminPanel', backref='superadmin', uselist=False, lazy=True)  #superadmin panel
 
 

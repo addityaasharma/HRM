@@ -8,6 +8,7 @@ from user_route import user
 from superadmin_routes import superAdminBP
 from middleware import auth_middleware
 from socket_instance import socketio
+from masteradmin import masterBP
 
 app = Flask(__name__)
 
@@ -41,6 +42,7 @@ migrate = Migrate(app, db)
 auth_middleware(app)
 app.register_blueprint(user)
 app.register_blueprint(superAdminBP)
+app.register_blueprint(masterBP)
 
 scheduler = APScheduler()
 scheduler.init_app(app)
