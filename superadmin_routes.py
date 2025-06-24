@@ -18,6 +18,8 @@ import re, json
 import random 
 import string
 from redis import Redis
+from sqlalchemy import func
+
 
 
 
@@ -132,7 +134,6 @@ def request_otp():
         return jsonify({'status': 'error', 'message': 'Failed to send OTP'}), 500
 
 
-
 @superAdminBP.route('/signup', methods=['POST'])
 def supAdmin_signup():
     try:
@@ -154,7 +155,7 @@ def supAdmin_signup():
         if not data:
             return jsonify({'message': 'Invalid or missing JSON body'}), 400
 
-        required_fields = ['companyName', 'companyEmail', 'company_password', 'is_super_admin', 'otp', 'expiry']
+        required_fields = ['companyName', 'companyEmail', 'company_password', 'otp', 'expiry']
         if not all(field in data for field in required_fields):
             return jsonify({'message': 'All fields are required'}), 400
 
@@ -190,7 +191,7 @@ def supAdmin_signup():
             company_estabilish=data.get('company_estabilish'),
             company_years=data.get('company_years'),
             company_password=generate_password_hash(data.get('company_password')),
-            is_super_admin=data.get('is_super_admin'),
+            is_super_admin=True,
             master_id=masterAdmin.masteradminPanel.id,
             expiry_date=expiry_date  # <-- Setting expiry
         )
@@ -721,7 +722,7 @@ def all_users_or_one(id):
         if id != 0:
             single_user = next((u for u in all_users_query if u.id == id), None)
             if not single_user:
-                return jsonify({'status': 'error', 'message': 'User not found'}), 404
+                return jsonify({'status': 'error', 'message': 'User not found'}), 200
 
             user_promotions = []
             if single_user.panelData:
@@ -1102,7 +1103,7 @@ def allTickets():
             return jsonify({
                 'status': 'error',
                 'message': 'No users found under this SuperAdminPanel.'
-            }), 404
+            }), 200
 
         all_tickets = []
 
@@ -1400,7 +1401,7 @@ def user_leaves():
             return jsonify({
                 "status": "error",
                 "message": "No users found in panel"
-            }), 404
+            }), 200
 
         all_leaves = []
         for user in panel_users:
@@ -1434,7 +1435,7 @@ def user_leaves():
             return jsonify({
                 "status": "error",
                 "message": "No leave records found"
-            }), 404
+            }), 200
 
         all_leaves.sort(key=lambda x: x["appliedOnRaw"] or datetime.min, reverse=True)
 
@@ -1547,7 +1548,7 @@ def addLeave():
     if not data:
         return jsonify({"status": "error", "message": "No data provided"}), 400
 
-    required_fields = ['leaveName', 'leaveType', 'calculationType', 'probation', 'day_type', 'carryforward', 'encashment', 'lapse_policy','max_leave_once', 'max_leave_year', 'monthly_leave_limit']
+    required_fields = ['leaveName', 'leaveType', 'calculationType', 'probation', 'day_type', 'carryforward', 'max_leave_once', 'max_leave_year', 'monthly_leave_limit']
 
     if not all(field in data for field in required_fields):
         return jsonify({"status": "error", "message": "Please enter all required fields"}), 400
@@ -2954,7 +2955,7 @@ def get_employee_documents():
             return jsonify({
                 "status": "error",
                 "message": f"No user found with id {user_id}"
-            }), 404
+            }), 200
 
         total_documents = len(all_documents)
         paginated_docs = all_documents[offset:offset + limit]
@@ -3286,7 +3287,7 @@ def get_upcoming_birthdays():
             return jsonify({
                 "status": "error",
                 "message": "No users yet"
-            }), 404
+            }), 200
 
         today = datetime.today()
         upcoming_birthdays = []
@@ -4240,7 +4241,7 @@ def get_message_users(id):
         if id != 0:
             user = next((u for u in all_users if u.id == id), None)
             if not user:
-                return jsonify({"status": "error", "message": "User not found"}), 404
+                return jsonify({"status": "error", "message": "User not found"}), 200
 
             return jsonify({
                 "status": "success",

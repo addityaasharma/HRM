@@ -1,6 +1,6 @@
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask import Blueprint, request, jsonify, g
-from models import db, Master, MasterPanel, SuperAdmin
+from models import db, Master, MasterPanel, SuperAdmin, SuperAdminPanel
 from middleware import create_tokens  # Assuming you have a JWT token creation utility
 from flask import Blueprint
 
@@ -184,7 +184,7 @@ def get_details():
         }), 500
 
 
-@masterBP.route('/adminslist', methods=['GET'])
+@masterBP.route('/admin', methods=['GET'])
 def get_all_superadmins():
     try:
         userID = g.user.get('userID') if g.user else None
@@ -216,7 +216,7 @@ def get_all_superadmins():
                 "company_estabilish": admin.company_estabilish.strftime("%Y-%m-%d") if admin.company_estabilish else None,
                 "company_years": admin.company_years,
                 "is_super_admin": admin.is_super_admin,
-                "expiry": admin.expiry.strftime("%Y-%m-%d") if admin.expiry else None,
+                "expiry": admin.expiry_date.strftime("%Y-%m-%d") if admin.expiry_date else None,
                 "panel_id": admin.superadminPanel.id if admin.superadminPanel else None
             })
 
@@ -232,4 +232,84 @@ def get_all_superadmins():
             "status": "error",
             "message": "Internal Server Error",
             "error": str(e),
+        }), 500
+
+
+@masterBP.route('/admin/<int:admin_id>', methods=['PUT'])
+def edit_superadmin(admin_id):
+    try:
+        userID = g.user.get('userID') if g.user else None
+        if not userID:
+            return jsonify({"status": "error", "message": "Unauthorized access"}), 403
+
+        master = Master.query.filter_by(id=userID).first()
+        if not master:
+            return jsonify({"status": "error", "message": "Master admin not found"}), 404
+
+        superadmin = SuperAdmin.query.filter_by(id=admin_id, master_id=master.masteradminPanel.id).first()
+        if not superadmin:
+            return jsonify({"status": "error", "message": "SuperAdmin not found"}), 404
+
+        data = request.get_json()
+        allowed_fields = ['companyName', 'company_type', 'company_website', 'company_estabilish', 'company_years', 'is_super_admin', 'expiry_date']
+        
+        for field in allowed_fields:
+            if field in data:
+                if field == 'company_estabilish' or field == 'expiry_date':
+                    setattr(superadmin, field, datetime.strptime(data[field], "%Y-%m-%d"))
+                else:
+                    setattr(superadmin, field, data[field])
+
+        db.session.commit()
+
+        return jsonify({
+            "status": "success",
+            "message": "SuperAdmin updated successfully"
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e)
+        }), 500
+
+
+@masterBP.route('/admin/<int:admin_id>', methods=['DELETE'])
+def delete_superadmin(admin_id):
+    try:
+        userID = g.user.get('userID') if g.user else None
+        if not userID:
+            return jsonify({"status": "error", "message": "Unauthorized access"}), 403
+
+        master = Master.query.filter_by(id=userID).first()
+        if not master:
+            return jsonify({"status": "error", "message": "Master admin not found"}), 404
+
+        # Check superadmin belongs to this master panel
+        superadmin = SuperAdmin.query.filter_by(id=admin_id, master_id=master.masteradminPanel.id).first()
+        if not superadmin:
+            return jsonify({"status": "error", "message": "SuperAdmin not found"}), 404
+
+        # Fetch and delete panel if exists
+        panel = SuperAdminPanel.query.filter_by(superadmin_id=superadmin.id).first()
+        if panel:
+            db.session.delete(panel)
+
+        # Then delete the superadmin
+        db.session.delete(superadmin)
+        db.session.commit()
+
+        return jsonify({
+            "status": "success",
+            "message": "SuperAdmin and related panel deleted successfully"
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e)
         }), 500

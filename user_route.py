@@ -351,14 +351,14 @@ def get_punchDetails():
             return jsonify({
                 "status": "error",
                 "message": "No user found"
-            }), 404
+            }), 200
 
         panel_data = user.panelData
         if not panel_data:
             return jsonify({
                 "status": "error",
                 "message": "User panel data not found"
-            }), 404
+            }), 200
 
         punchdetails = panel_data.userPunchData
         if not punchdetails:
@@ -523,7 +523,7 @@ def get_Profile():
             return jsonify({
                 "status": "error",
                 "message": "No user found"
-            }), 404
+            }), 400
 
         access_permissions = [
             {
@@ -596,6 +596,7 @@ def edit_Profile():
         userId = g.user.get('userID') if g.user else None
         if not userId:
             return jsonify({
+                "data" : [],
                 'status': 'error',
                 'message': 'No auth token provided or user not found.'
             }), 400
@@ -849,7 +850,7 @@ def get_assigned_tickets_to_user():
 
         user = User.query.filter_by(id=user_id).first()
         if not user:
-            return jsonify({"status": "error", "message": "User not found"}), 404
+            return jsonify({"status": "error", "message": "User not found"}), 200
 
         emp_id = user.empId
 
@@ -1194,7 +1195,7 @@ def salary_details():
         
         salaryDetails = user.panelData.UserSalary
         if not salaryDetails:
-            return jsonify({"status" : "error", "message" : "No salary details"}), 409
+            return jsonify({"status" : "error", "message" : "No salary details"}), 200
         
         salarylist=[]
         for salary in salaryDetails:
@@ -1288,7 +1289,7 @@ def get_user_salary():
 
         salary = UserSalary.query.filter_by(panelData=user.panelData.id).first()
         if not salary:
-            return jsonify({'status': 'error', 'message': 'Salary details not found'}), 404
+            return jsonify({'status': 'error', 'message': 'Salary details not found'}), 200
 
         return jsonify({
             'status': 'success',
@@ -1364,7 +1365,7 @@ def all_users(id):
         adminID = user.superadminId
         superadmin = SuperAdmin.query.filter_by(superId=adminID).first()
         if not superadmin or not superadmin.superadminPanel or not superadmin.superadminPanel.allUsers:
-            return jsonify({"status": "error", "message": "No Admin or users found associated with you"}), 404
+            return jsonify({"status": "error", "message": "No Admin or users found associated with you"}), 200
 
         all_users = superadmin.superadminPanel.allUsers
 
@@ -1942,7 +1943,7 @@ def get_announcement():
             return jsonify({
                 "status": "error",
                 "message": "No user found",
-            }), 404
+            }), 200
 
         useradmin = SuperAdmin.query.filter_by(superId=user.superadminId).first()
         if not useradmin:
@@ -2086,7 +2087,7 @@ def get_Notice():
             return jsonify({
                 "status": "error",
                 "message": "User not found",
-            }), 404
+            }), 200
 
         userAdmin = SuperAdmin.query.filter_by(superId=user.superadminId).first()
         if not userAdmin:
@@ -2141,14 +2142,14 @@ def holidays():
             return jsonify({
                 "status": "error",
                 "message": "Unauthorized",
-            }), 404
+            }), 200
 
         superadmin = SuperAdmin.query.filter_by(superId=user.superadminId).first()
         if not superadmin:
             return jsonify({
                 "status": "error",
                 "message": "Unauthorized",
-            }), 404
+            }), 200
 
         holiday_list = superadmin.superadminPanel.adminHolidays if hasattr(superadmin.superadminPanel, 'adminHolidays') else []
 
@@ -2156,7 +2157,7 @@ def holidays():
             return jsonify({
                 "status": "error",
                 "message": "No holidays yet",
-            }), 404
+            }), 200
 
         today = datetime.utcnow().date()
         upcoming = []
@@ -2220,13 +2221,13 @@ def request_assets():
             return jsonify({
                 "status": "error",
                 "message": "User not found",
-            }), 404
+            }), 200
 
         if not hasattr(user, 'panelData') or not user.panelData:
             return jsonify({
                 "status": "error",
                 "message": "User panel data not found"
-            }), 400
+            }), 200
 
         data = request.get_json()
         if not data:
@@ -2361,7 +2362,7 @@ def get_assets():
             return jsonify({
                 "status": "error",
                 "message": "User not found"
-            }), 404
+            }), 200
 
         if not hasattr(user, 'panelData') or not user.panelData:
             return jsonify({
@@ -2519,7 +2520,7 @@ def get_user_tasks_with_chat():
 
         user = User.query.filter_by(id=userId).first()
         if not user or not user.panelData:
-            return jsonify({"status": "error", "message": "User or panel not found"}), 404
+            return jsonify({"status": "error", "message": "User or panel not found"}), 200
 
         assigned_tasks = TaskUser.query.options(joinedload(TaskUser.taskmanagement)) \
             .filter_by(user_emp_id=user.empId).all()
@@ -2665,13 +2666,13 @@ def get_promotion():
             return jsonify({
                 "status": "error",
                 "message": "User not found"
-            }), 404
+            }), 200
 
         if not user.panelData:
             return jsonify({
                 "status": "error",
                 "message": "User panel data not found"
-            }), 404
+            }), 200
 
         promotions = UserPromotion.query.filter_by(userpanel=user.panelData.id).order_by(
             UserPromotion.dateofpromotion.desc()
@@ -2775,7 +2776,7 @@ def add_job_info():
 
         user = User.query.get(userID)
         if not user or not user.panelData:
-            return jsonify({"status": "error", "message": "User or panel data not found"}), 404
+            return jsonify({"status": "error", "message": "User or panel data not found"}), 200
 
         existing_info = JobInfo.query.filter_by(panelData=user.panelData.id).first()
         if existing_info:
@@ -2871,11 +2872,11 @@ def get_job_info():
 
         user = User.query.get(userID)
         if not user or not user.panelData:
-            return jsonify({"status": "error", "message": "User or panel data not found"}), 404
+            return jsonify({"status": "error", "message": "User or panel data not found"}), 200
 
         job_info = JobInfo.query.filter_by(panelData=user.panelData.id).first()
         if not job_info:
-            return jsonify({"status": "error", "message": "Job info not found"}), 404
+            return jsonify({"status": "error", "message": "Job info not found"}), 200
 
         def fmt(date):
             return date.strftime('%Y-%m-%d') if date else None
@@ -2934,7 +2935,7 @@ def get_user_salary_details():
             return jsonify({
                 "status": "error",
                 "message": "User or panel data not found"
-            }), 404
+            }), 200
 
         panel_data = user.panelData
         today = datetime.utcnow().date()
@@ -3112,21 +3113,21 @@ def get_admin_location_for_user():
             return jsonify({
                 "status": "error",
                 "message": "User not found or not associated with any admin"
-            }), 404
+            }), 200
 
         superadmin = SuperAdmin.query.filter_by(superId=user.superadminId).first()
         if not superadmin or not superadmin.superadminPanel:
             return jsonify({
                 "status": "error",
                 "message": "Admin panel not found"
-            }), 404
+            }), 200
 
         location = AdminLocation.query.filter_by(superpanel=superadmin.superadminPanel.id).first()
         if not location:
             return jsonify({
                 "status": "error",
                 "message": "Admin has not set a location yet"
-            }), 404
+            }), 200
 
         return jsonify({
             "status": "success",

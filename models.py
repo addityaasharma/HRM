@@ -48,10 +48,21 @@ class SuperAdmin(db.Model):
 class SuperAdminPanel(db.Model):
     __tablename__ = 'superadminpanel'
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    superadmin_id = db.Column(db.Integer, db.ForeignKey('superadmin.id'), nullable=False)
-    allUsers = db.relationship('User', backref='superadminpanel', lazy=True)
+    superadmin_id = db.Column(
+        db.Integer,
+        db.ForeignKey('superadmin.id', ondelete='CASCADE'),
+        nullable=False
+    )
+
+    allUsers = db.relationship(
+        'User',
+        backref='superadminpanel',
+        cascade="all, delete",
+        passive_deletes=True,
+        lazy=True
+    )
     adminLeave = db.relationship('AdminLeave', backref='superadminpanel', lazy=True)
-    adminDetails = db.relationship('AdminDetail', backref='superadminpanel',uselist=False, lazy=True)
+    adminDetails = db.relationship('AdminDetail', backref='superadminpanel', uselist=False, lazy=True)
     adminDocs = db.relationship('AdminDoc', backref='superadminpanel', lazy=True)
     adminAnnouncement = db.relationship('Announcement', backref='superadminpanel', lazy=True)
     adminNotice = db.relationship('Notice', backref='superadminpanel', lazy=True)
@@ -63,6 +74,7 @@ class SuperAdminPanel(db.Model):
     adminHolidays = db.relationship('AdminHoliday', backref='superadminpanel', lazy=True)
     adminDepartment = db.relationship('AdminDepartment', backref='superadminpanel', lazy=True)
     adminLocation = db.relationship('AdminLocation', backref='superadminpanel', lazy=True, uselist=False)
+
 
 
 class AdminLocation(db.Model):
