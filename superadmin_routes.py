@@ -301,8 +301,9 @@ def superadmin_login():
                 'status': 'error',
                 'message': 'Incorrect password',
             }), 401
-
-        access_token, refresh_token = create_tokens(user_id=user.id, role='hr')
+        
+        userrole = user.userRole if user.userRole else 'user'
+        access_token, refresh_token = create_tokens(user_id=user.id, role=userrole)
 
         return jsonify({
             'status': 'success',

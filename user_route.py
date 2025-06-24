@@ -58,8 +58,15 @@ def send_otp_route():
     if User.query.filter_by(email=email).first():
         return jsonify({'error': 'User already exists'}), 409
 
-    if not SuperAdmin.query.filter_by(superId=data['superadminId']).first():
-        return jsonify({'error': 'Invalid superadmin ID'}), 404
+    superadmin = SuperAdmin.query.filter_by(superId=data['superadminId']).first()
+    if not superadmin:
+        return jsonify({
+            "status" : "error",
+            "message" : "Please Enter valid id",
+        }), 400
+    
+    if superadmin.expiry_date and datetime.utcnow() > superadmin.expiry_date:
+        return jsonify({'error': 'Superadmin account expired. Cannot create user.'}), 403
 
     otp = generate_otp()
     otp_sent = send_otp(email, otp)
@@ -165,6 +172,13 @@ def user_login():
     user = User.query.filter_by(email=data['email']).first()
     if not user:
         return jsonify({'message': 'No user found'}), 404
+    
+    superadmin = SuperAdmin.query.filter_by(superId=user.superadminId).first()
+    if not superadmin:
+        return jsonify({'message': 'Superadmin not found'}), 404
+    
+    if superadmin.expiry_date and datetime.utcnow() > superadmin.expiry_date:
+        return jsonify({'message': 'Superadmin account has expired. Login denied.'}), 403
 
     if not check_password_hash(user.password, data['password']):
         return jsonify({'message': 'Invalid Password'}), 401

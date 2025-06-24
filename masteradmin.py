@@ -1,11 +1,12 @@
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask import Blueprint, request, jsonify, g
-from models import db, Master, MasterPanel
+from models import db, Master, MasterPanel, SuperAdmin
 from middleware import create_tokens  # Assuming you have a JWT token creation utility
 from flask import Blueprint
 
 
 masterBP = Blueprint('masteradmin',__name__, url_prefix='/master')
+
 
 @masterBP.route('/signup', methods=['POST'])
 def master_signup():
@@ -82,7 +83,7 @@ def master_login():
     }), 200
 
 
-@masterBP.route('/update', methods=['PUT'])
+@masterBP.route('/profile', methods=['PUT'])
 def update_master_admin():
 
     userID = g.user.get('userID') if g.user else None
@@ -143,4 +144,92 @@ def update_master_admin():
             "status": "error",
             "message": "Something went wrong while updating profile",
             "error": str(e)
+        }), 500
+
+
+@masterBP.route('/profile', methods=['GET'])
+def get_details():
+    try:
+        userID = g.user.get('userID') if g.user else None
+        if not userID:
+            return jsonify({
+                "status": "error",
+                "message": "Unauthorized",
+            }), 403
+
+        master = Master.query.filter_by(id=userID).first()
+        if not master:
+            return jsonify({
+                "status": "error",
+                "message": "Master admin not found",
+            }), 404
+
+        return jsonify({
+            "status": "success",
+            "message": "Profile fetched successfully",
+            "data": {
+                "id": master.id,
+                "name": master.name,
+                "company_email": master.company_email,
+                "panel_id": master.masteradminPanel.id if master.masteradminPanel else None
+            }
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e),
+        }), 500
+
+
+@masterBP.route('/adminslist', methods=['GET'])
+def get_all_superadmins():
+    try:
+        userID = g.user.get('userID') if g.user else None
+        if not userID:
+            return jsonify({
+                "status": "error",
+                "message": "Unauthorized access"
+            }), 403
+
+        master = Master.query.filter_by(id=userID).first()
+        if not master:
+            return jsonify({
+                "status": "error",
+                "message": "Master admin not found"
+            }), 404
+
+        panel_id = master.masteradminPanel.id
+        superadmins = SuperAdmin.query.filter_by(master_id=panel_id).all()
+
+        superadmin_list = []
+        for admin in superadmins:
+            superadmin_list.append({
+                "id": admin.id,
+                "superId": admin.superId,
+                "companyName": admin.companyName,
+                "companyEmail": admin.companyEmail,
+                "company_type": admin.company_type,
+                "company_website": admin.company_website,
+                "company_estabilish": admin.company_estabilish.strftime("%Y-%m-%d") if admin.company_estabilish else None,
+                "company_years": admin.company_years,
+                "is_super_admin": admin.is_super_admin,
+                "expiry": admin.expiry.strftime("%Y-%m-%d") if admin.expiry else None,
+                "panel_id": admin.superadminPanel.id if admin.superadminPanel else None
+            })
+
+        return jsonify({
+            "status": "success",
+            "message": "SuperAdmins fetched successfully",
+            "data": superadmin_list
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "status": "error",
+            "message": "Internal Server Error",
+            "error": str(e),
         }), 500
